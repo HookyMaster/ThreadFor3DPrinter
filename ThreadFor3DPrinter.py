@@ -356,7 +356,9 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
 
 class MyDestroyHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
-        _handlers.clear()
+        # 只清理命令执行相关的 handler，保留 commandCreated handler 以支持下次点击
+        global _handlers
+        _handlers[:] = [h for h in _handlers if isinstance(h, MyCommandCreatedHandler)]
 
 
 # ══════════════════════════════════════════════════════
