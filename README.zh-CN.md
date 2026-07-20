@@ -1,8 +1,22 @@
-# ThreadFor3DPrinter
+# Fusion 360 3D 打印螺纹生成器
 
-[English README](README.md)
+[![Release](https://img.shields.io/github/v/release/HookyMaster/ThreadFor3DPrinter)](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-ThreadFor3DPrinter 是一个 Autodesk Fusion 附加模块，用于生成适合 3D 打印的粗牙梯形外螺纹或内螺纹。生成的螺纹牙型两侧均为固定的 **45° 牙侧角**。选择一个圆柱面后，工具会自动判断它是螺杆外表面，还是螺母/圆孔内表面。
+[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.0.zip)
+
+<img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
+
+**ThreadFor3DPrinter** 是一个 Autodesk Fusion 附加模块，用于生成适合 3D 打印的粗牙梯形**外螺纹和内螺纹**。选择圆柱面后，工具会自动判断它属于螺杆外表面还是螺母/圆孔内表面。
+
+## 主要功能
+
+- 同时支持螺杆外螺纹和螺母/圆孔内螺纹。
+- 使用适合 3D 打印的梯形牙型，两侧为固定 **45° 牙侧角**。
+- 自动识别内、外圆柱面。
+- 支持调整齿宽、牙高、采样精度和端面偏移。
+- 支持 Windows 和 macOS 上的 Autodesk Fusion。
 
 ## 安装所需文件
 

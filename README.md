@@ -1,8 +1,22 @@
-# ThreadFor3DPrinter
+# Fusion 360 3D Printable Thread Generator
 
-[中文说明](README.zh-CN.md)
+[![Release](https://img.shields.io/github/v/release/HookyMaster/ThreadFor3DPrinter)](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-ThreadFor3DPrinter is an Autodesk Fusion add-in for generating coarse trapezoidal external or internal threads suitable for 3D printing. The generated thread profile has fixed **45-degree flanks on both sides**. Select a cylindrical face and the add-in automatically determines whether it is an outside surface (bolt) or an inside surface (nut/hole).
+[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.0.zip)
+
+<img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
+
+**ThreadFor3DPrinter** is an Autodesk Fusion add-in that generates coarse trapezoidal **internal and external threads for 3D printing**. Select a cylindrical face and the add-in automatically detects whether it belongs to a bolt or a nut/hole.
+
+## Features
+
+- Generates both external bolt threads and internal nut/hole threads.
+- Uses a 3D-printing-friendly trapezoidal profile with fixed **45-degree flanks**.
+- Automatically detects internal and external cylindrical faces.
+- Provides adjustable tooth width, thread height, sampling resolution, and end offset.
+- Supports Autodesk Fusion on Windows and macOS.
 
 ## Files required for installation
 
