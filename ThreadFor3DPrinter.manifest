@@ -1,0 +1,12 @@
+{
+	"autodeskProduct":	"Fusion",
+	"type":	"addin",
+	"author":	"",
+	"description":	{
+		"":	"适用于3D打印的外/内螺纹生成工具，自动识别表面 (External/internal thread generator for 3D printing, auto-detects surfaces)"
+	},
+	"version":	"1.0.0",
+	"supportedOS":	"windows|mac",
+	"editEnabled":	true,
+	"iconFilename":	"icon-v4.png"
+}
