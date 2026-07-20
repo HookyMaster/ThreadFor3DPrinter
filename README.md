@@ -94,7 +94,7 @@ The add-in reserves approximately one full turn of axial space. The generated nu
 The sweep is created as a **new body**. Use Fusion's **Combine** command to:
 
 - **Join** it to the cylinder for an external thread.
-- **Cut** it from the surrounding part for an internal thread.
+- **Join** it to the surrounding part for an internal thread as well.
 
 For reliable 3D-printed mating parts, add clearance appropriate to your printer, material, layer height, and nozzle size. Test with a short sample before printing the final part.
 
