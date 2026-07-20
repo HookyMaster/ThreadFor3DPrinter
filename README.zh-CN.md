@@ -18,6 +18,16 @@
 - 支持调整齿宽、牙高、采样精度和端面偏移。
 - 支持 Windows 和 macOS 上的 Autodesk Fusion。
 
+## 效果展示
+
+| 外螺纹 | 内螺纹 |
+| --- | --- |
+| ![Fusion 360 外螺纹生成器完成适合 3D 打印的梯形螺杆螺纹](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 内螺纹生成器完成螺母圆孔螺纹](docs/images/fusion-360-internal-thread-generator.png) |
+
+### 内外螺纹配合剖面
+
+![Fusion 360 剖面分析显示内外 3D 打印螺纹的配合效果](docs/images/internal-external-thread-section.png)
+
 ## 安装所需文件
 
 请将以下三个文件放在同一个文件夹中：

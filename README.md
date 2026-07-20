@@ -18,6 +18,16 @@
 - Provides adjustable tooth width, thread height, sampling resolution, and end offset.
 - Supports Autodesk Fusion on Windows and macOS.
 
+## Screenshots
+
+| External thread | Internal thread |
+| --- | --- |
+| ![Fusion 360 external thread generator showing a completed trapezoidal bolt thread](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 internal thread generator showing a completed threaded hole](docs/images/fusion-360-internal-thread-generator.png) |
+
+### Internal and external thread section view
+
+![Fusion 360 section analysis showing the fit between internal and external 3D-printable threads](docs/images/internal-external-thread-section.png)
+
 ## Files required for installation
 
 Keep these three files together in one folder:
