@@ -367,13 +367,20 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f'【螺旋】 P={P*10:.2f} mm  转数={turns}  高度={helix_height*10:.2f} mm\n'
                 f'【结果】 实体={sweep_feature.bodies.count}'
             )
+            R_mm = radius * 10
             if is_external:
-                R_mm = radius * 10
                 nut_dia = 2 * R_mm + 2 * H_cm * 10
                 msg += (
                     f'\n\n📌 配合螺母建议内径：\n'
                     f'  螺母内径 ≈ 圆柱外径({2*R_mm:.1f}mm) + {2*H_cm*10:.1f}mm (2×H) + 间隙\n'
                     f'              = {nut_dia:.1f}mm + 间隙（建议 0.3~0.5mm）'
+                )
+            else:
+                screw_dia = 2 * R_mm - 2 * H_cm * 10
+                msg += (
+                    f'\n\n📌 配合螺杆建议外径：\n'
+                    f'  螺杆外径 ≈ 圆孔内径({2*R_mm:.1f}mm) - {2*H_cm*10:.1f}mm (2×H) - 间隙\n'
+                    f'              = {screw_dia:.1f}mm - 间隙（建议 0.3~0.5mm）'
                 )
             _ui.messageBox(msg, '生成成功')
         except:
