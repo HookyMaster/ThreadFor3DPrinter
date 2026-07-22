@@ -248,6 +248,8 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                     N -= 1
                 act_h = N * P
                 n_total = min(max(4, int(N * ppt)), 400) + 1 if N > 0 else 0
+                # 估算螺旋路径总长度
+                path_len = N * 2 * math.pi * radius  # 约等于
 
                 lines.append(f'<b>类型:</b> {typ_label}（{dir_label}）')
                 lines.append(f'<b>长边 L:</b> {L_val*10:.2f} mm　'
@@ -256,6 +258,8 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
+                if N > 20:
+                    lines.append('<font color="orange">⚠ 转数过多，扫掠可能失败</font>')
                 if not is_ext and H_val >= radius:
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
