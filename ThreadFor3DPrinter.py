@@ -249,8 +249,10 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 act_h = N * P
                 n_pts = min(max(4, int(N * ppt)), 400) if N > 0 else 0
                 n_total = n_pts + 1 if N > 0 else 0
-                # 估算螺旋路径总长度
-                path_m = N * 2 * math.pi * radius / 1000  # 约等于
+                # 螺旋路径总长度（考虑螺距）
+                circle_mm = 2 * math.pi * radius * 10  # 每圈周长 mm
+                P_mm = P * 10
+                path_m = N * math.sqrt(circle_mm**2 + P_mm**2) / 1000 if N > 0 else 0
 
                 lines.append(f'<b>类型:</b> {typ_label}（{dir_label}）')
                 lines.append(f'<b>长边 L:</b> {L_val*10:.2f} mm　'
