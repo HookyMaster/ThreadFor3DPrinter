@@ -150,14 +150,14 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     return sketch, short_len
 
 
-def _do_sweep(root, profile, helix_spline, guide_face):
+def _do_sweep(root, profile, helix_spline, guide_face, is_external):
     """扫掠：轮廓沿螺旋线路径，圆柱面做引导曲面"""
     # Sweep: profile along helix path, using cylinder face as guide surface
     path = root.features.createPath(helix_spline)
     sweeps = root.features.sweepFeatures
-    sweep_input = sweeps.createInput(
-        profile, path,
-        adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+    op = (adsk.fusion.FeatureOperations.JoinFeatureOperation if is_external
+          else adsk.fusion.FeatureOperations.CutFeatureOperation)
+    sweep_input = sweeps.createInput(profile, path, op)
     fv = adsk.fusion.BRepFaceVector()
     fv.push_back(guide_face)
     sweep_input.guideSurfaces = fv
@@ -261,7 +261,7 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
-                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}')
+                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.1f} m　<b>样条线点数:</b> {n_pts}')
                 if n_pts > 300:
                     lines.append('<font color="orange">⚠ 样条线点数过多(>300)，曲线可能过冲导致扫掠失败，建议降低采样</font>')
                 elif N > 0 and n_pts < N * 4:
@@ -357,7 +357,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
 
             # ── 步骤5：Sweep ──
             # ── Step 5: Sweep ──
-            sweep_feature = _do_sweep(root, profile, spline, face)
+            sweep_feature = _do_sweep(root, profile, spline, face, is_external)
 
             _app.activeViewport.fit()
 
