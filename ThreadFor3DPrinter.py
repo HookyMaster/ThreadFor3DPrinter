@@ -187,16 +187,16 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs.addTextBoxCommandInput('sep1', '',
                 '<b>── 梯形截面参数 ──</b>', 1, True)
             inputs.addValueInput('long_L', '长边 L（齿宽）', 'mm',
-                adsk.core.ValueInput.createByString('8 mm'))
-            inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
                 adsk.core.ValueInput.createByString('3 mm'))
+            inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
+                adsk.core.ValueInput.createByString('1 mm'))
 
             inputs.addTextBoxCommandInput('sep2', '',
                 '<b>── 路径参数 ──</b>', 1, True)
             inputs.addValueInput('ppt', '每圈采样点数', '',
                 adsk.core.ValueInput.createByReal(16))
             inputs.addValueInput('offset', '端面偏移', 'mm',
-                adsk.core.ValueInput.createByString('5 mm'))
+                adsk.core.ValueInput.createByString('0 mm'))
 
             inputs.addTextBoxCommandInput('calc_info', '自动计算',
                 '<i>选择面后自动计算...</i>', 6, True)
