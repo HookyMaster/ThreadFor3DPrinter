@@ -247,9 +247,10 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 if N * P > height - offset and N > 1:
                     N -= 1
                 act_h = N * P
-                n_total = min(max(4, int(N * ppt)), 400) + 1 if N > 0 else 0
+                n_pts = min(max(4, int(N * ppt)), 400) if N > 0 else 0
+                n_total = n_pts + 1 if N > 0 else 0
                 # 估算螺旋路径总长度
-                path_len = N * 2 * math.pi * radius  # 约等于
+                path_m = N * 2 * math.pi * radius / 1000  # 约等于
 
                 lines.append(f'<b>类型:</b> {typ_label}（{dir_label}）')
                 lines.append(f'<b>长边 L:</b> {L_val*10:.2f} mm　'
@@ -258,8 +259,11 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
-                path_m = N * 2 * math.pi * radius / 1000
-                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m')
+                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}')
+                if n_pts > 300:
+                    lines.append('<font color="orange">⚠ 样条线点数过多(>300)，曲线可能过冲导致扫掠失败，建议降低采样</font>')
+                elif N > 0 and n_pts < N * 4:
+                    lines.append('<font color="orange">⚠ 每圈采样点过少(<4)，螺纹形状可能不精确，建议提高采样</font>')
                 if not is_ext and H_val >= radius:
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
