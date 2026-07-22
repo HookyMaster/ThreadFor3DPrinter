@@ -29,6 +29,13 @@ def _get_cyl_info(face):
     ]
     ax = adsk.core.Vector3D.create(axis.x, axis.y, axis.z)
     ax.normalize()
+    # 统一 axis 方向：用 bb.minPoint/bb.maxPoint 判断，确保 axis 从物理底面指向顶面
+    v_min = adsk.core.Vector3D.create(
+        bb.minPoint.x - origin.x, bb.minPoint.y - origin.y, bb.minPoint.z - origin.z)
+    v_max = adsk.core.Vector3D.create(
+        bb.maxPoint.x - origin.x, bb.maxPoint.y - origin.y, bb.maxPoint.z - origin.z)
+    if v_min.dotProduct(ax) > v_max.dotProduct(ax):
+        ax.scaleBy(-1)  # 翻转，使 axis 从底面指向顶面
     projs = []
     for c in corners:
         v = adsk.core.Vector3D.create(c.x - origin.x, c.y - origin.y, c.z - origin.z)
