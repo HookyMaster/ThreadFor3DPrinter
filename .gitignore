@@ -3,3 +3,4 @@
 .tools/
 reasonix.toml
 dist/
+__pycache__/
