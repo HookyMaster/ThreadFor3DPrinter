@@ -8,4 +8,4 @@ Run from the repository root:
 powershell -ExecutionPolicy Bypass -File marketplace/build-marketplace.ps1
 ```
 
-The script creates `dist/ThreadFor3DPrinter-Marketplace-1.0.2.zip` and `dist/ThreadFor3DPrinter-v1.0.2.zip`, then validates the required bundle files, JSON manifest, and XML package metadata.
+The script creates `dist/ThreadFor3DPrinter-Marketplace-1.0.3.zip` and `dist/ThreadFor3DPrinter-v1.0.3.zip`, then validates the required bundle files, JSON manifest, and XML package metadata.
