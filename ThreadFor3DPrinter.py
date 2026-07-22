@@ -194,7 +194,7 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs.addTextBoxCommandInput('sep2', '',
                 '<b>── 路径参数 ──</b>', 1, True)
             inputs.addValueInput('ppt', '每圈采样点数', '',
-                adsk.core.ValueInput.createByReal(16))
+                adsk.core.ValueInput.createByReal(12))
             inputs.addValueInput('offset', '端面偏移', 'mm',
                 adsk.core.ValueInput.createByString('0 mm'))
 
