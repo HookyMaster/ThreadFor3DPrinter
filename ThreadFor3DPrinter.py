@@ -384,6 +384,13 @@ def run(_context: str):
     try:
         # 删除旧命令（如有）
         # Delete old command (if any)
+        ws = _ui.workspaces.itemById('FusionSolidEnvironment')
+        if ws:
+            panel = ws.toolbarPanels.itemById('SolidCreatePanel')
+            if panel:
+                ctrl = panel.controls.itemById(CMD_ID)
+                if ctrl:
+                    ctrl.deleteMe()
         old = _ui.commandDefinitions.itemById(CMD_ID)
         if old:
             old.deleteMe()
@@ -415,6 +422,15 @@ def stop(_context: str):
     global _ui, _handlers
     _handlers.clear()
     try:
+        # 先移除工具栏上的控件
+        ws = _ui.workspaces.itemById('FusionSolidEnvironment')
+        if ws:
+            panel = ws.toolbarPanels.itemById('SolidCreatePanel')
+            if panel:
+                ctrl = panel.controls.itemById(CMD_ID)
+                if ctrl:
+                    ctrl.deleteMe()
+        # 再删除命令定义
         cmd_def = _ui.commandDefinitions.itemById(CMD_ID)
         if cmd_def:
             cmd_def.deleteMe()
