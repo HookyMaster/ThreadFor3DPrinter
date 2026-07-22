@@ -29,6 +29,13 @@ def _get_cyl_info(face):
     ]
     ax = adsk.core.Vector3D.create(axis.x, axis.y, axis.z)
     ax.normalize()
+    # 统一 axis 方向：用 bb.minPoint/bb.maxPoint 判断，确保 axis 从物理底面指向顶面
+    v_min = adsk.core.Vector3D.create(
+        bb.minPoint.x - origin.x, bb.minPoint.y - origin.y, bb.minPoint.z - origin.z)
+    v_max = adsk.core.Vector3D.create(
+        bb.maxPoint.x - origin.x, bb.maxPoint.y - origin.y, bb.maxPoint.z - origin.z)
+    if v_min.dotProduct(ax) > v_max.dotProduct(ax):
+        ax.scaleBy(-1)  # 翻转，使 axis 从底面指向顶面
     projs = []
     for c in corners:
         v = adsk.core.Vector3D.create(c.x - origin.x, c.y - origin.y, c.z - origin.z)
@@ -180,16 +187,16 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs.addTextBoxCommandInput('sep1', '',
                 '<b>── 梯形截面参数 ──</b>', 1, True)
             inputs.addValueInput('long_L', '长边 L（齿宽）', 'mm',
-                adsk.core.ValueInput.createByString('8 mm'))
-            inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
                 adsk.core.ValueInput.createByString('3 mm'))
+            inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
+                adsk.core.ValueInput.createByString('1 mm'))
 
             inputs.addTextBoxCommandInput('sep2', '',
                 '<b>── 路径参数 ──</b>', 1, True)
             inputs.addValueInput('ppt', '每圈采样点数', '',
-                adsk.core.ValueInput.createByReal(16))
+                adsk.core.ValueInput.createByReal(12))
             inputs.addValueInput('offset', '端面偏移', 'mm',
-                adsk.core.ValueInput.createByString('5 mm'))
+                adsk.core.ValueInput.createByString('0 mm'))
 
             inputs.addTextBoxCommandInput('calc_info', '自动计算',
                 '<i>选择面后自动计算...</i>', 6, True)
@@ -240,7 +247,12 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 if N * P > height - offset and N > 1:
                     N -= 1
                 act_h = N * P
-                n_total = min(max(4, int(N * ppt)), 400) + 1 if N > 0 else 0
+                n_pts = min(max(4, int(N * ppt)), 400) if N > 0 else 0
+                n_total = n_pts + 1 if N > 0 else 0
+                # 螺旋路径总长度（考虑螺距）
+                circle_mm = 2 * math.pi * radius * 10  # 每圈周长 mm
+                P_mm = P * 10
+                path_m = N * math.sqrt(circle_mm**2 + P_mm**2) / 1000 if N > 0 else 0
 
                 lines.append(f'<b>类型:</b> {typ_label}（{dir_label}）')
                 lines.append(f'<b>长边 L:</b> {L_val*10:.2f} mm　'
@@ -249,6 +261,11 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
+                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}')
+                if n_pts > 300:
+                    lines.append('<font color="orange">⚠ 样条线点数过多(>300)，曲线可能过冲导致扫掠失败，建议降低采样</font>')
+                elif N > 0 and n_pts < N * 4:
+                    lines.append('<font color="orange">⚠ 每圈采样点过少(<4)，螺纹形状可能不精确，建议提高采样</font>')
                 if not is_ext and H_val >= radius:
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
@@ -346,12 +363,28 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
 
             S_mm = short_cm * 10
             typ_label = '外螺纹（螺杆）' if is_external else '内螺纹（螺母）'
-            _ui.messageBox(
+            msg = (
                 f'✅ {typ_label} 生成完成！\n\n'
                 f'【截面】 L={L_cm*10:.2f} mm  S={S_mm:.2f} mm  H={H_cm*10:.2f} mm\n'
                 f'【螺旋】 P={P*10:.2f} mm  转数={turns}  高度={helix_height*10:.2f} mm\n'
-                f'【结果】 实体={sweep_feature.bodies.count}',
-                '生成成功')
+                f'【结果】 实体={sweep_feature.bodies.count}'
+            )
+            R_mm = radius * 10
+            if is_external:
+                nut_dia = 2 * R_mm + 2 * H_cm * 10
+                msg += (
+                    f'\n\n📌 配合螺母建议内径：\n'
+                    f'  螺母内径 ≈ 圆柱外径({2*R_mm:.1f}mm) + {2*H_cm*10:.1f}mm (2×H) + 间隙\n'
+                    f'              = {nut_dia:.1f}mm + 间隙（建议 0.3~0.5mm）'
+                )
+            else:
+                screw_dia = 2 * R_mm - 2 * H_cm * 10
+                msg += (
+                    f'\n\n📌 配合螺杆建议外径：\n'
+                    f'  螺杆外径 ≈ 圆孔内径({2*R_mm:.1f}mm) - {2*H_cm*10:.1f}mm (2×H) - 间隙\n'
+                    f'              = {screw_dia:.1f}mm - 间隙（建议 0.3~0.5mm）'
+                )
+            _ui.messageBox(msg, '生成成功')
         except:
             _ui.messageBox(traceback.format_exc(), '执行失败')
 
@@ -377,6 +410,13 @@ def run(_context: str):
     try:
         # 删除旧命令（如有）
         # Delete old command (if any)
+        ws = _ui.workspaces.itemById('FusionSolidEnvironment')
+        if ws:
+            panel = ws.toolbarPanels.itemById('SolidCreatePanel')
+            if panel:
+                ctrl = panel.controls.itemById(CMD_ID)
+                if ctrl:
+                    ctrl.deleteMe()
         old = _ui.commandDefinitions.itemById(CMD_ID)
         if old:
             old.deleteMe()
@@ -408,6 +448,15 @@ def stop(_context: str):
     global _ui, _handlers
     _handlers.clear()
     try:
+        # 先移除工具栏上的控件
+        ws = _ui.workspaces.itemById('FusionSolidEnvironment')
+        if ws:
+            panel = ws.toolbarPanels.itemById('SolidCreatePanel')
+            if panel:
+                ctrl = panel.controls.itemById(CMD_ID)
+                if ctrl:
+                    ctrl.deleteMe()
+        # 再删除命令定义
         cmd_def = _ui.commandDefinitions.itemById(CMD_ID)
         if cmd_def:
             cmd_def.deleteMe()

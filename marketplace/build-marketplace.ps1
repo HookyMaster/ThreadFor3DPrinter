@@ -4,8 +4,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $bundleRoot = Join-Path $PSScriptRoot 'ADSK.ThreadFor3DPrinter.bundle'
 $contentsRoot = Join-Path $bundleRoot 'Contents'
 $distRoot = Join-Path $repoRoot 'dist'
-$version = '1.0.1'
+$version = '1.0.2'
 $zipPath = Join-Path $distRoot "ThreadFor3DPrinter-Marketplace-$version.zip"
+$releaseStage = Join-Path $distRoot 'ThreadFor3DPrinter'
+$releaseZipPath = Join-Path $distRoot "ThreadFor3DPrinter-v$version.zip"
 
 $sourceFiles = @(
     'ThreadFor3DPrinter.py',
@@ -47,4 +49,21 @@ if (Test-Path -LiteralPath $zipPath) {
     Remove-Item -LiteralPath $zipPath -Force
 }
 Compress-Archive -LiteralPath $bundleRoot -DestinationPath $zipPath -CompressionLevel Optimal
+
+if (Test-Path -LiteralPath $releaseStage) {
+    Remove-Item -LiteralPath $releaseStage -Recurse -Force
+}
+New-Item -ItemType Directory -Force -Path $releaseStage | Out-Null
+foreach ($sourceFile in $sourceFiles) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot $sourceFile) -Destination $releaseStage -Force
+}
+Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $releaseStage -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot 'README.zh-CN.md') -Destination $releaseStage -Force
+if (Test-Path -LiteralPath $releaseZipPath) {
+    Remove-Item -LiteralPath $releaseZipPath -Force
+}
+Compress-Archive -LiteralPath $releaseStage -DestinationPath $releaseZipPath -CompressionLevel Optimal
+Remove-Item -LiteralPath $releaseStage -Recurse -Force
+
 Write-Output "Created $zipPath"
+Write-Output "Created $releaseZipPath"

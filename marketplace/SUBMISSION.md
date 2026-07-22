@@ -3,7 +3,7 @@
 ## Product
 
 - Product name: ThreadFor3DPrinter
-- Version: 1.0.1
+- Version: 1.0.2
 - Autodesk product: Fusion
 - App type: Add-in
 - Operating systems: Windows 64-bit and macOS
@@ -51,7 +51,7 @@ Close Fusion, then uninstall ThreadFor3DPrinter using the operating system's ins
 2. Create a solid cylinder at least 30 mm in diameter and 60 mm long.
 3. Run Solid > Create > ThreadFor3DPrinter.
 4. Select the outside cylindrical face.
-5. Use defaults: L = 8 mm, H = 3 mm, points per turn = 16, offset = 5 mm.
+5. Use defaults: L = 3 mm, H = 1 mm, points per turn = 12, offset = 0 mm.
 6. Confirm the add-in reports an external thread, then choose OK.
 7. Verify a separate swept thread body is created without errors.
 8. Create a second body with a cylindrical hole and repeat using the inside cylindrical face.
@@ -63,7 +63,7 @@ Close Fusion, then uninstall ThreadFor3DPrinter using the operating system's ins
 - External-thread screenshot: `docs/images/fusion-360-external-thread-generator.png`
 - Internal-thread screenshot: `docs/images/fusion-360-internal-thread-generator.png`
 - Section-view screenshot: `docs/images/internal-external-thread-section.png`
-- Submission package: `dist/ThreadFor3DPrinter-Marketplace-1.0.1.zip`
+- Submission package: `dist/ThreadFor3DPrinter-Marketplace-1.0.2.zip`
 
 ## Publisher fields that require the account owner
 

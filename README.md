@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.1.zip)
+[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.2.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -16,6 +16,8 @@
 - Uses a 3D-printing-friendly trapezoidal profile with fixed **45-degree flanks**.
 - Automatically detects internal and external cylindrical faces.
 - Provides adjustable tooth width, thread height, sampling resolution, and end offset.
+- Shows the estimated helix length and spline-point count, with warnings for risky sampling settings.
+- Reports a suggested mating nut or bolt diameter after generation, including recommended print clearance.
 - Supports Autodesk Fusion on Windows and macOS.
 
 ## Screenshots
@@ -86,11 +88,11 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **External thread (bolt):** the profile grows outward.
    - **Internal thread (nut):** the profile grows inward.
 4. Set the thread parameters:
-   - **Long edge L (tooth width):** axial width of the trapezoidal profile. Default: `8 mm`.
-   - **Trapezoid height H:** radial thread depth/height. Default: `3 mm`. The profile uses the same distance `H` in the axial direction at each side, producing a fixed **45° thread flank angle**.
-   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`.
-   - **End offset:** distance between the cylinder end and the start of the helix. Default: `5 mm`.
-5. Review the automatically calculated short edge, pitch, turn count, helix height, cylinder size, and detected thread type.
+   - **Long edge L (tooth width):** axial width of the trapezoidal profile. Default: `3 mm`.
+   - **Trapezoid height H:** radial thread depth/height. Default: `1 mm`. The profile uses the same distance `H` in the axial direction at each side, producing a fixed **45° thread flank angle**.
+   - **Points per turn:** helix sampling resolution. Default: `12`; minimum: `4`.
+   - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
+5. Review the automatically calculated short edge, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
 
 ## Parameter rules
@@ -119,6 +121,8 @@ The sweep is created as a **new body**. Use Fusion's **Combine** command to:
 
 - **Join** it to the cylinder for an external thread.
 - **Join** it to the surrounding part for an internal thread as well.
+
+After generation, the completion dialog also shows a suggested mating diameter. Treat it as a starting point and validate the recommended `0.3–0.5 mm` clearance with a short print test.
 
 For reliable 3D-printed mating parts, add clearance appropriate to your printer, material, layer height, and nozzle size. Test with a short sample before printing the final part.
 

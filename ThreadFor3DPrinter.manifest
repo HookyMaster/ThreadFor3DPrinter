@@ -7,7 +7,7 @@
 		"":	"适用于3D打印的外/内螺纹生成工具，自动识别表面 (External/internal thread generator for 3D printing, auto-detects surfaces)",
 		"en":	"External/internal thread generator for 3D printing, auto-detects surfaces"
 	},
-	"version":	"1.0.1",
+	"version":	"1.0.2",
 	"runOnStartup":	true,
 	"supportedOS":	"windows|mac",
 	"editEnabled":	true,
