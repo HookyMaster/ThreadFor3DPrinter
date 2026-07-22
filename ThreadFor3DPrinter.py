@@ -258,8 +258,8 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
-                if N > 20:
-                    lines.append('<font color="orange">⚠ 转数过多，扫掠可能失败</font>')
+                path_m = N * 2 * math.pi * radius / 1000
+                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m')
                 if not is_ext and H_val >= radius:
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
