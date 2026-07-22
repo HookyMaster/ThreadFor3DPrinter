@@ -2,3 +2,4 @@
 .agents/
 .tools/
 reasonix.toml
+dist/

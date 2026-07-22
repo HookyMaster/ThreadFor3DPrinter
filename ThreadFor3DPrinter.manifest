@@ -1,5 +1,5 @@
 {
-	"autodeskProduct":	"Fusion",
+	"autodeskProduct":	"Fusion360",
 	"type":	"addin",
 	"id":	"com.github.hookymaster.threadfor3dprinter",
 	"author":	"hookymaster",
@@ -8,6 +8,7 @@
 		"en":	"External/internal thread generator for 3D printing, auto-detects surfaces"
 	},
 	"version":	"1.0.1",
+	"runOnStartup":	true,
 	"supportedOS":	"windows|mac",
 	"editEnabled":	true,
 	"iconFilename":	"icon-v4.png"

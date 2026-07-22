@@ -5,6 +5,7 @@ _app      = None
 _ui       = None
 _handlers = []
 CMD_ID    = 'threadTool_v1'
+PRIVACY_URL = 'https://github.com/HookyMaster/ThreadFor3DPrinter/blob/master/docs/PRIVACY.md'
 
 
 # ══════════════════════════════════════════════════════
@@ -169,7 +170,8 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
             inputs.addTextBoxCommandInput('hdr', '',
                 '<b>螺纹生成工具（外/内螺纹自动识别）</b><br/>'
-                '选择圆柱外表面（螺杆）或圆孔内表面（螺母），自动识别。', 2, True)
+                '选择圆柱外表面（螺杆）或圆孔内表面（螺母），自动识别。<br/>'
+                f'<a href="{PRIVACY_URL}">隐私政策 / Privacy Policy</a>', 3, True)
 
             sel = inputs.addSelectionInput('face', '圆柱/圆孔面', '请点击圆柱外表面或圆孔内表面')
             sel.addSelectionFilter('CylindricalFaces')

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ThreadFor3DPrinter Help</title>
+  <style>
+    body { max-width: 820px; margin: 2rem auto; padding: 0 1rem; font: 16px/1.55 system-ui, sans-serif; color: #222; }
+    img { max-width: 100%; height: auto; }
+    code { background: #f2f2f2; padding: .1rem .3rem; }
+  </style>
+</head>
+<body>
+  <h1>ThreadFor3DPrinter</h1>
+  <p>This Autodesk Fusion add-in generates coarse trapezoidal internal and external threads suitable for 3D printing.</p>
+  <h2>Quick start</h2>
+  <ol>
+    <li>Open a design containing a solid cylinder or a cylindrical hole.</li>
+    <li>Choose <strong>Solid &gt; Create &gt; ThreadFor3DPrinter</strong>.</li>
+    <li>Select exactly one cylindrical face. The add-in detects an external or internal face automatically.</li>
+    <li>Set tooth width, thread height, sampling resolution, and end offset, then choose <strong>OK</strong>.</li>
+    <li>Use Fusion's <strong>Combine</strong> command to join the generated thread body to the target part.</li>
+  </ol>
+  <h2>Input rules</h2>
+  <p><code>L &gt; 0</code>, <code>H &gt; 0</code>, and <code>L - 2H &gt; 0</code>. For internal threads, <code>H</code> must be smaller than the hole radius.</p>
+  <h2>Uninstall</h2>
+  <p>Close Fusion and uninstall ThreadFor3DPrinter from the operating system's installed-apps interface. For a manually installed copy, stop the add-in and remove its folder.</p>
+  <h2>Support and privacy</h2>
+  <p><a href="https://github.com/HookyMaster/ThreadFor3DPrinter/issues">Technical support</a></p>
+  <p><a href="https://github.com/HookyMaster/ThreadFor3DPrinter/blob/master/docs/PRIVACY.md">Privacy policy</a></p>
+</body>
+</html>
