@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.2.zip)
+[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.3.zip)
 
 <img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
 
@@ -90,7 +90,7 @@ ThreadFor3DPrinter/
 4. 设置螺纹参数：
    - **长边 L（齿宽）**：梯形截面沿轴向的长边宽度，默认 `3 mm`。
    - **梯形高度 H（径向牙高）**：螺纹径向高度/深度，默认 `1 mm`。牙型每侧的轴向退让距离同样为 `H`，因此形成固定的 **45° 螺纹牙侧角**。
-   - **每圈采样点数**：螺旋线的采样精度，默认 `12`，最小值为 `4`。
+   - **每圈采样点数**：螺旋线的采样精度，默认 `16`，最小值为 `4`。
    - **端面偏移**：从圆柱端面到螺旋线起点的距离，默认 `0 mm`。
 5. 检查工具自动计算的短边、螺距、圈数、螺旋高度和总长、样条线点数、圆柱尺寸及内外螺纹类型。
 6. 点击 **确定**。工具会创建螺旋路径、梯形截面，并扫掠生成螺纹实体。

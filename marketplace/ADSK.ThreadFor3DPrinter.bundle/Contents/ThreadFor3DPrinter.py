@@ -194,7 +194,7 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs.addTextBoxCommandInput('sep2', '',
                 '<b>── 路径参数 ──</b>', 1, True)
             inputs.addValueInput('ppt', '每圈采样点数', '',
-                adsk.core.ValueInput.createByReal(12))
+                adsk.core.ValueInput.createByReal(16))
             inputs.addValueInput('offset', '端面偏移', 'mm',
                 adsk.core.ValueInput.createByString('0 mm'))
 
@@ -217,13 +217,14 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
     def notify(self, args):
         try:
-            inputs   = adsk.core.InputChangedEventArgs.cast(args).inputs
-            sel_inp  = adsk.core.SelectionCommandInput.cast(inputs.itemById('face'))
-            L_inp    = adsk.core.ValueCommandInput.cast(inputs.itemById('long_L'))
-            H_inp    = adsk.core.ValueCommandInput.cast(inputs.itemById('trap_H'))
-            ppt_inp  = adsk.core.ValueCommandInput.cast(inputs.itemById('ppt'))
-            off_inp  = adsk.core.ValueCommandInput.cast(inputs.itemById('offset'))
-            calc_box = adsk.core.TextBoxCommandInput.cast(inputs.itemById('calc_info'))
+            ea       = adsk.core.InputChangedEventArgs.cast(args)
+            all_ins  = ea.firingEvent.sender.commandInputs
+            sel_inp  = adsk.core.SelectionCommandInput.cast(all_ins.itemById('face'))
+            L_inp    = adsk.core.ValueCommandInput.cast(all_ins.itemById('long_L'))
+            H_inp    = adsk.core.ValueCommandInput.cast(all_ins.itemById('trap_H'))
+            ppt_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('ppt'))
+            off_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('offset'))
+            calc_box = adsk.core.TextBoxCommandInput.cast(all_ins.itemById('calc_info'))
 
             has_face = sel_inp.selectionCount > 0
             L_val    = L_inp.value

@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.2.zip)
+[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.0.3.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -90,7 +90,7 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
 4. Set the thread parameters:
    - **Long edge L (tooth width):** axial width of the trapezoidal profile. Default: `3 mm`.
    - **Trapezoid height H:** radial thread depth/height. Default: `1 mm`. The profile uses the same distance `H` in the axial direction at each side, producing a fixed **45° thread flank angle**.
-   - **Points per turn:** helix sampling resolution. Default: `12`; minimum: `4`.
+   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
 5. Review the automatically calculated short edge, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
