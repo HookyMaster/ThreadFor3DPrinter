@@ -72,7 +72,7 @@ def _build_helix(face, L, H, pts_per_turn, offset_cm=0):
     radius, height, h_min, ax, origin = _get_cyl_info(face)
     P = 2.0 * (L - H)
     usable = height - offset_cm
-    N = max(1, int(usable / P) - 1)  # 留一圈空间
+    N = max(1, int(usable / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
     # Reserve one full turn of space
     hh = N * P
     h_start = h_min + offset_cm       # 偏移后的起始高度
@@ -150,7 +150,7 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     return sketch, short_len
 
 
-def _do_sweep(root, profile, helix_spline, guide_face):
+def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None):
     """扫掠：轮廓沿螺旋线路径，圆柱面做引导曲面"""
     # Sweep: profile along helix path, using cylinder face as guide surface
     path = root.features.createPath(helix_spline)
@@ -161,6 +161,8 @@ def _do_sweep(root, profile, helix_spline, guide_face):
     fv = adsk.fusion.BRepFaceVector()
     fv.push_back(guide_face)
     sweep_input.guideSurfaces = fv
+    if occurrence:
+        sweep_input.creationOccurrence = occurrence
     return sweeps.add(sweep_input)
 
 
@@ -243,7 +245,7 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 typ_label = '外螺纹（螺杆）' if is_ext else '内螺纹（螺母）'
                 dir_label = '向外长肉' if is_ext else '向内长肉'
 
-                N = max(1, int((height - offset) / P) - 1)  # 留一圈空间
+                N = max(1, int((height - offset) / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
                 # Reserve one full turn of space
                 if N * P > height - offset and N > 1:
                     N -= 1
@@ -327,12 +329,26 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             design = adsk.fusion.Design.cast(_app.activeProduct)
             root   = design.rootComponent
 
+            # 确定工作上下文：实体用 root，零件用子组件
+            occ  = adsk.fusion.Occurrence.cast(face.body.assemblyContext)
+            comp = occ.component if occ else root
+
             # ── 步骤1：螺旋线路径 ──
             # ── Step 1: Helix path ──
             pts, turns, helix_height, P, radius = _build_helix(
                 face, L_cm, H_cm, pts_per_turn, offset_cm)
+            # 如果是子组件，将全局坐标转为局部坐标
+            if occ:
+                inv = occ.transform2.copy()
+                inv.invert()
+                local_pts = adsk.core.ObjectCollection.create()
+                for i in range(pts.count):
+                    pt = pts.item(i).copy()
+                    pt.transformBy(inv)
+                    local_pts.add(pt)
+                pts = local_pts
             sname = f'Helix_R{radius:.2f}_P{P:.2f}'
-            sketch_helix = root.sketches.add(root.xYConstructionPlane)
+            sketch_helix = comp.sketches.add(comp.xYConstructionPlane)
             sketch_helix.name = sname
             sketch_helix.isComputeDeferred = True
             spline = sketch_helix.sketchCurves.sketchFittedSplines.add(pts)
@@ -340,15 +356,15 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
 
             # ── 步骤2：路径起点处垂直平面 ──
             # ── Step 2: Perpendicular plane at path start ──
-            pi = root.constructionPlanes.createInput()
+            pi = comp.constructionPlanes.createInput()
             pi.setByDistanceOnPath(spline, adsk.core.ValueInput.createByReal(0))
-            perp_plane = root.constructionPlanes.add(pi)
+            perp_plane = comp.constructionPlanes.add(pi)
             perp_plane.name = 'PerpPlane'
 
             # ── 步骤3：梯形截面 ──
             # ── Step 3: Trapezoid cross-section ──
             sketch_trap, short_cm = _create_trapezoid(
-                root, perp_plane, face, L_cm, H_cm, pts[0], is_external)
+                comp, perp_plane, face, L_cm, H_cm, pts.item(0), is_external)
 
             # ── 步骤4：获取轮廓 ──
             # ── Step 4: Get profile ──
@@ -358,7 +374,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
 
             # ── 步骤5：Sweep ──
             # ── Step 5: Sweep ──
-            sweep_feature = _do_sweep(root, profile, spline, face)
+            sweep_feature = _do_sweep(comp, profile, spline, face, occ)
 
             _app.activeViewport.fit()
 
