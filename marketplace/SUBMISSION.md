@@ -3,7 +3,7 @@
 ## Product
 
 - Product name: ThreadFor3DPrinter
-- Version: 1.0.3
+- Version: 1.1.1
 - Autodesk product: Fusion
 - App type: Add-in
 - Operating systems: Windows 64-bit and macOS
@@ -63,7 +63,7 @@ Close Fusion, then uninstall ThreadFor3DPrinter using the operating system's ins
 - External-thread screenshot: `docs/images/fusion-360-external-thread-generator.png`
 - Internal-thread screenshot: `docs/images/fusion-360-internal-thread-generator.png`
 - Section-view screenshot: `docs/images/internal-external-thread-section.png`
-- Submission package: `dist/ThreadFor3DPrinter-Marketplace-1.0.3.zip`
+- Submission package: `dist/ThreadFor3DPrinter-Marketplace-1.1.1.zip`
 
 ## Publisher fields that require the account owner
 

@@ -5,7 +5,7 @@
     AutodeskProduct="Fusion360"
     Name="ThreadFor3DPrinter"
     Description="Generate 3D-printing-friendly internal and external trapezoidal threads in Autodesk Fusion."
-    AppVersion="1.0.3"
+    AppVersion="1.1.1"
     Author="HookyMaster"
     AppNameSpace="appstore.exchange.autodesk.com"
     ProductCode="{00B63C80-6B08-4797-A191-2ABDCF2E5C01}"
@@ -19,7 +19,7 @@
     <RuntimeRequirements OS="Win64|Mac" Platform="Fusion360" />
     <ComponentEntry
         AppName="ThreadFor3DPrinter"
-        Version="1.0.3"
+        Version="1.1.1"
         ModuleName="./Contents/ThreadFor3DPrinter.manifest"
         AppDescription="Generate 3D-printing-friendly internal and external trapezoidal threads." />
   </Components>
