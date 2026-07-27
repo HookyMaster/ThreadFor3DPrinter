@@ -126,13 +126,82 @@ ThreadFor3DPrinter/
 
 对于需要互相配合的 3D 打印螺纹，应根据打印机、材料、层高和喷嘴尺寸预留间隙。建议先打印一段短测试件，再制作最终零件。
 
+## 无界面自动化 API
+
+`ThreadFor3DPrinter.py` 提供两个公共 Python 函数，无需打开或操作
+Fusion 命令对话框即可生成螺纹。
+
+### 直接传入圆柱面
+
+```python
+import ThreadFor3DPrinter as thread_tool
+
+result = thread_tool.generate_thread(
+    face=target_cylindrical_face,
+    tooth_width_mm=1.5,
+    tooth_height_mm=0.5,
+    end_offset_mm=1.0,
+    samples_per_turn=16,
+    join_to_target=True,
+    feature_name='Lid_Internal_Thread',
+    max_turns_per_sweep=4,
+)
+print(result)
+```
+
+### 使用 JSON 和实体令牌
+
+```python
+payload = {
+    'face_token': target_cylindrical_face.entityToken,
+    'tooth_width_mm': 1.5,
+    'tooth_height_mm': 0.5,
+    'end_offset_mm': 1.0,
+    'samples_per_turn': 16,
+    'join_to_target': True,
+    'feature_name': 'Lid_Internal_Thread',
+    'max_turns_per_sweep': 4,
+}
+
+result = thread_tool.generate_thread_from_json(payload)
+```
+
+`generate_thread_from_json` 可以接收 Python 字典或 JSON 对象字符串。
+返回值是可直接序列化为 JSON 的字典，包含：
+
+- 检测到的螺纹类型（`external` 或 `internal`）；
+- 牙型尺寸、短边长度和联动计算出的螺距；
+- 圈数和实际生成的螺纹长度；
+- 圆柱半径和高度；
+- 采样数及端面偏移；
+- 扫掠段数及每段最大圈数；
+- 是否已与目标实体合并；
+- Fusion 时间线组名称；
+- 结果实体令牌。
+
+### 自动化说明
+
+- `face` 必须是真实的圆柱 BRep 面。
+- 公共 API 的尺寸单位均为毫米。
+- `tooth_width_mm` 必须大于 `2 * tooth_height_mm`。
+- `samples_per_turn` 的最小有效值为 `4`。
+- `max_turns_per_sweep` 默认为 `4`。长螺纹采用分段扫掠，以避免
+  Fusion 几何内核在长路径上失败；螺距联动公式保持不变。
+- 每次生成只创建一个螺旋草图、一个截面构造平面和一个截面草图。
+  后续扫掠段从上一段的末端面继续，并始终保留圆柱导向面。
+- 每次成功生成产生的所有特征都会放入一个名为
+  `<feature_name>_Generation` 的 Fusion 时间线组。
+- `join_to_target=False` 保持 GUI 的原有行为，生成独立螺纹实体。
+- `join_to_target=True` 会将螺纹合并到选中的目标实体。
+- `feature_name` 用作草图、构造平面、扫掠、实体和组合特征的名称前缀。
+
 ## 常见问题
 
 - **“确定”按钮不可用：** 确认只选择了一个圆柱面，并检查参数是否满足上述约束。
 - **提示内螺纹牙高错误：** 减小 `H`，确保它小于圆孔半径。
 - **工具栏中没有命令：** 在“脚本和附加模块”中重新运行附加模块，或重启 Fusion。
 - **图标没有更新：** 关闭并重新打开“脚本和附加模块”窗口，或重启 Fusion。
-- **螺纹看起来有棱角：** 增加“每圈采样点数”。数值越高，几何量和计算时间越大；脚本将螺旋线总采样数限制为 400。
+- **螺纹看起来有棱角：** 增加“每圈采样点数”。数值越高，几何量和计算时间越大；脚本将螺旋线总采样数限制为 4000。
 - **扫掠失败：** 尝试使用更简单的圆柱实体、减小螺纹尺寸、增加轴向可用长度，或增大端面偏移。
 
 ## 卸载

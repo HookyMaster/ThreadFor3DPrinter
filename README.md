@@ -126,6 +126,81 @@ After generation, the completion dialog also shows a suggested mating diameter. 
 
 For reliable 3D-printed mating parts, add clearance appropriate to your printer, material, layer height, and nozzle size. Test with a short sample before printing the final part.
 
+## Headless automation API
+
+`ThreadFor3DPrinter.py` also exposes two public Python functions for automation.
+They generate threads directly without opening or controlling the Fusion command
+dialog.
+
+### Direct face call
+
+```python
+import ThreadFor3DPrinter as thread_tool
+
+result = thread_tool.generate_thread(
+    face=target_cylindrical_face,
+    tooth_width_mm=1.5,
+    tooth_height_mm=0.5,
+    end_offset_mm=1.0,
+    samples_per_turn=16,
+    join_to_target=True,
+    feature_name='Lid_Internal_Thread',
+    max_turns_per_sweep=4,
+)
+print(result)
+```
+
+### JSON and entity-token call
+
+```python
+payload = {
+    'face_token': target_cylindrical_face.entityToken,
+    'tooth_width_mm': 1.5,
+    'tooth_height_mm': 0.5,
+    'end_offset_mm': 1.0,
+    'samples_per_turn': 16,
+    'join_to_target': True,
+    'feature_name': 'Lid_Internal_Thread',
+    'max_turns_per_sweep': 4,
+}
+
+result = thread_tool.generate_thread_from_json(payload)
+```
+
+`generate_thread_from_json` accepts either a Python dictionary or a JSON object
+string. Its result is a JSON-serializable dictionary containing:
+
+- detected thread type (`external` or `internal`);
+- tooth dimensions, short edge, and calculated pitch;
+- turn count and generated thread length;
+- cylinder radius and height;
+- sampling and end-offset values;
+- sweep segment count and maximum turns per segment;
+- whether the generated thread was joined to the target body;
+- the generated Fusion timeline group name;
+- the resulting body entity token.
+
+### Automation notes
+
+- `face` must be a true cylindrical BRep face.
+- Public API dimensions are expressed in millimetres.
+- `tooth_width_mm` must be greater than `2 * tooth_height_mm`.
+- `samples_per_turn` has a minimum effective value of `4`.
+- `max_turns_per_sweep` defaults to `4`. Long threads are swept in multiple
+  sections to avoid Fusion kernel failures. The linked pitch formula remains
+  unchanged.
+- One generation call creates one helix sketch, one profile plane, and one
+  profile sketch. Later sweep sections continue from the previous section's
+  end face while retaining the cylindrical guide surface.
+- All features created by one successful generation call are collected in one
+  Fusion timeline group named `<feature_name>_Generation`.
+- `join_to_target=False` preserves the GUI's legacy behaviour and returns a
+  separate thread body.
+- `join_to_target=True` joins the generated thread to the selected body and
+  produces a single printable body.
+- `feature_name` is used as the prefix for generated sketches, planes, sweep,
+  body, and combine feature names.
+
 ## Troubleshooting
 
 - **The OK button is disabled:** select exactly one cylindrical face and verify the parameter rules above.

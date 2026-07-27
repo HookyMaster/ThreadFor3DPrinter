@@ -1,5 +1,5 @@
 import adsk.core, adsk.fusion
-import math, traceback
+import json, math, traceback
 
 _app      = None
 _ui       = None
@@ -77,7 +77,7 @@ def _build_helix(face, L, H, pts_per_turn, offset_cm=0):
     hh = N * P
     h_start = h_min + offset_cm       # 偏移后的起始高度
     # Adjusted starting height after offset
-    n_pts = min(max(4, int(N * pts_per_turn)), 400)
+    n_pts = min(max(4, int(N * pts_per_turn)), 4000)
     u = _radial_dir(ax)
     v = ax.crossProduct(u)
     v.normalize()
@@ -150,20 +150,264 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     return sketch, short_len
 
 
-def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None):
+def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None,
+              operation=adsk.fusion.FeatureOperations.NewBodyFeatureOperation):
     """扫掠：轮廓沿螺旋线路径，圆柱面做引导曲面"""
     # Sweep: profile along helix path, using cylinder face as guide surface
-    path = root.features.createPath(helix_spline)
+    path = root.features.createPath(helix_spline, False)
     sweeps = root.features.sweepFeatures
     sweep_input = sweeps.createInput(
-        profile, path,
-        adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        profile, path, operation)
     fv = adsk.fusion.BRepFaceVector()
     fv.push_back(guide_face)
     sweep_input.guideSurfaces = fv
     if occurrence:
         sweep_input.creationOccurrence = occurrence
     return sweeps.add(sweep_input)
+
+
+def generate_thread(face, tooth_width_mm, tooth_height_mm,
+                    end_offset_mm=0.0, samples_per_turn=16,
+                    join_to_target=False, feature_name='GeneratedThread',
+                    max_turns_per_sweep=4):
+    """Generate a printable trapezoidal thread without opening the GUI.
+
+    Args:
+        face: Cylindrical BRepFace (native face or assembly-context proxy).
+        tooth_width_mm: Trapezoid long edge / tooth width in millimetres.
+        tooth_height_mm: Radial tooth height in millimetres.
+        end_offset_mm: Axial offset from the detected cylinder start.
+        samples_per_turn: Spline sample count per turn (minimum 4).
+        join_to_target: Join the generated thread body to the selected body.
+        feature_name: Browser name for generated sketches/features.
+        max_turns_per_sweep: Maximum turns in each sweep segment.
+
+    Returns:
+        A JSON-serialisable dict describing the generated thread.
+
+    Raises:
+        ValueError: Invalid face or dimensions.
+        RuntimeError: Fusion failed to construct or join the thread.
+    """
+    face = adsk.fusion.BRepFace.cast(face)
+    if not face:
+        raise ValueError('face must be a BRepFace')
+    if not adsk.core.Cylinder.cast(face.geometry):
+        raise ValueError('face must be a true cylindrical BRep face')
+
+    L_cm = float(tooth_width_mm) / 10.0
+    H_cm = float(tooth_height_mm) / 10.0
+    offset_cm = float(end_offset_mm) / 10.0
+    pts_per_turn = max(4, int(samples_per_turn))
+    segment_turn_limit = max(1, int(max_turns_per_sweep))
+    if L_cm <= 0 or H_cm <= 0:
+        raise ValueError('tooth_width_mm and tooth_height_mm must be positive')
+    if L_cm - 2.0 * H_cm <= 0:
+        raise ValueError('tooth_width_mm must be greater than 2 * tooth_height_mm')
+    if offset_cm < 0:
+        raise ValueError('end_offset_mm must be non-negative')
+
+    app = adsk.core.Application.get()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        raise RuntimeError('No active Fusion design')
+
+    is_external = _is_external_face(face)
+    radius, cylinder_height, _, _, _ = _get_cyl_info(face)
+    if not is_external and H_cm >= radius:
+        raise ValueError('Internal thread tooth height must be smaller than the hole radius')
+
+    occurrence = adsk.fusion.Occurrence.cast(face.body.assemblyContext)
+    if occurrence:
+        comp = occurrence.component
+        target_body = face.body.nativeObject
+    else:
+        target_body = face.body
+        comp = target_body.parentComponent
+
+    pts, turns, helix_height, pitch, radius = _build_helix(
+        face, L_cm, H_cm, pts_per_turn, offset_cm)
+    if turns < 1 or helix_height <= 0:
+        raise ValueError('Selected cylinder is too short for the requested thread and offset')
+
+    if occurrence:
+        inv = occurrence.transform2.copy()
+        inv.invert()
+        local_pts = adsk.core.ObjectCollection.create()
+        for i in range(pts.count):
+            pt = pts.item(i).copy()
+            pt.transformBy(inv)
+            local_pts.add(pt)
+        pts = local_pts
+
+    safe_name = feature_name or 'GeneratedThread'
+    timeline_start_index = design.timeline.count
+    segment_count = int(math.ceil(turns / segment_turn_limit))
+    sketch_helix = comp.sketches.add(comp.xYConstructionPlane)
+    sketch_helix.name = safe_name + '_Helix'
+    sketch_helix.isComputeDeferred = True
+    segment_splines = []
+
+    for segment_index in range(segment_count):
+        first_turn = segment_index * segment_turn_limit
+        last_turn = min(turns, first_turn + segment_turn_limit)
+        first_point = first_turn * pts_per_turn
+        last_point = min(pts.count - 1, last_turn * pts_per_turn)
+        segment_points = adsk.core.ObjectCollection.create()
+        for point_index in range(first_point, last_point + 1):
+            segment_points.add(pts.item(point_index))
+        segment_splines.append(
+            sketch_helix.sketchCurves.sketchFittedSplines.add(
+                segment_points))
+
+    sketch_helix.isComputeDeferred = False
+
+    plane_input = comp.constructionPlanes.createInput()
+    plane_input.setByDistanceOnPath(
+        segment_splines[0], adsk.core.ValueInput.createByReal(0))
+    perp_plane = comp.constructionPlanes.add(plane_input)
+    perp_plane.name = safe_name + '_ProfilePlane'
+
+    sketch_trap, short_cm = _create_trapezoid(
+        comp, perp_plane, face, L_cm, H_cm, pts.item(0), is_external)
+    sketch_trap.name = safe_name + '_Profile'
+    if sketch_trap.profiles.count == 0:
+        raise RuntimeError('Thread profile did not form a closed region')
+
+    segment_bodies = []
+    sweep_profile = sketch_trap.profiles.item(0)
+    for segment_index, spline in enumerate(segment_splines):
+        suffix = (
+            '' if segment_count == 1
+            else '_Segment_' + str(segment_index + 1))
+        segment_name = safe_name + suffix
+
+        source_body = (
+            sweep_profile.body
+            if adsk.fusion.BRepFace.cast(sweep_profile)
+            else None)
+        sweep_feature = _do_sweep(
+            comp, sweep_profile, spline, face, occurrence)
+        sweep_feature.name = segment_name + '_Sweep'
+        new_bodies = []
+        for body_index in range(sweep_feature.bodies.count):
+            candidate = sweep_feature.bodies.item(body_index)
+            if not source_body or candidate.entityToken != source_body.entityToken:
+                new_bodies.append(candidate)
+        if len(new_bodies) != 1:
+            raise RuntimeError(
+                'Expected one new body in sweep segment ' +
+                str(segment_index + 1) + ', got ' +
+                str(len(new_bodies)))
+        segment_body = new_bodies[0]
+        segment_body.name = segment_name + '_Body'
+        segment_bodies.append(segment_body)
+        if segment_index + 1 < segment_count:
+            end_faces = sweep_feature.endFaces
+            if not end_faces or end_faces.count != 1:
+                raise RuntimeError(
+                    'Expected one end face in sweep segment ' +
+                    str(segment_index + 1))
+            sweep_profile = end_faces.item(0)
+
+    thread_body = segment_bodies[0]
+    if len(segment_bodies) > 1:
+        tools = adsk.core.ObjectCollection.create()
+        for segment_body in segment_bodies[1:]:
+            tools.add(segment_body)
+        combine_input = comp.features.combineFeatures.createInput(
+            thread_body, tools)
+        combine_input.operation = (
+            adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        combine_input.isKeepToolBodies = False
+        combine_feature = comp.features.combineFeatures.add(combine_input)
+        combine_feature.name = safe_name + '_Segments_Join'
+    thread_body.name = safe_name + '_Body'
+
+    joined = False
+    result_body = thread_body
+    if join_to_target:
+        tools = adsk.core.ObjectCollection.create()
+        tools.add(thread_body)
+        combine_input = comp.features.combineFeatures.createInput(
+            target_body, tools)
+        combine_input.operation = (
+            adsk.fusion.FeatureOperations.JoinFeatureOperation)
+        combine_input.isKeepToolBodies = False
+        combine_feature = comp.features.combineFeatures.add(combine_input)
+        combine_feature.name = safe_name + '_Join'
+        result_body = target_body
+        joined = True
+
+    timeline_end_index = design.timeline.count - 1
+    timeline_group = design.timeline.timelineGroups.add(
+        timeline_start_index, timeline_end_index)
+    if not timeline_group:
+        raise RuntimeError('Failed to create timeline group')
+    timeline_group.name = safe_name + '_Generation'
+
+    app.activeViewport.fit()
+    return {
+        'success': True,
+        'thread_type': 'external' if is_external else 'internal',
+        'tooth_width_mm': L_cm * 10.0,
+        'short_edge_mm': short_cm * 10.0,
+        'tooth_height_mm': H_cm * 10.0,
+        'pitch_mm': pitch * 10.0,
+        'turns': turns,
+        'thread_length_mm': helix_height * 10.0,
+        'end_offset_mm': offset_cm * 10.0,
+        'samples_per_turn': pts_per_turn,
+        'segment_count': segment_count,
+        'max_turns_per_sweep': segment_turn_limit,
+        'cylinder_radius_mm': radius * 10.0,
+        'cylinder_height_mm': cylinder_height * 10.0,
+        'joined_to_target': joined,
+        'timeline_group_name': timeline_group.name,
+        'result_body_token': result_body.entityToken,
+    }
+
+
+def generate_thread_from_json(payload):
+    """JSON-friendly automation entry point.
+
+    Required payload field:
+        face_token
+
+    Optional fields:
+        tooth_width_mm, tooth_height_mm, end_offset_mm,
+        samples_per_turn, join_to_target, feature_name,
+        max_turns_per_sweep
+    """
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if not isinstance(payload, dict):
+        raise ValueError('payload must be a dict or JSON object string')
+    token = payload.get('face_token')
+    if not token:
+        raise ValueError('payload.face_token is required')
+
+    design = adsk.fusion.Design.cast(
+        adsk.core.Application.get().activeProduct)
+    if not design:
+        raise RuntimeError('No active Fusion design')
+    entities = design.findEntityByToken(token)
+    if not entities:
+        raise ValueError('face_token did not resolve in the active design')
+    face = adsk.fusion.BRepFace.cast(entities[0])
+    if not face:
+        raise ValueError('face_token does not identify a BRepFace')
+
+    return generate_thread(
+        face=face,
+        tooth_width_mm=payload.get('tooth_width_mm', 3.0),
+        tooth_height_mm=payload.get('tooth_height_mm', 1.0),
+        end_offset_mm=payload.get('end_offset_mm', 0.0),
+        samples_per_turn=payload.get('samples_per_turn', 16),
+        join_to_target=bool(payload.get('join_to_target', False)),
+        feature_name=payload.get('feature_name', 'GeneratedThread'),
+        max_turns_per_sweep=payload.get('max_turns_per_sweep', 4),
+    )
 
 
 # ══════════════════════════════════════════════════════
@@ -312,6 +556,66 @@ class MyValidateHandler(adsk.core.ValidateInputsEventHandler):
 
 class MyExecuteHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
+        """Read GUI inputs and delegate all modelling to the public API."""
+        try:
+            inputs = adsk.core.CommandEventArgs.cast(
+                args).command.commandInputs
+            selection = adsk.core.SelectionCommandInput.cast(
+                inputs.itemById('face'))
+            tooth_width = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('long_L'))
+            tooth_height = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('trap_H'))
+            samples = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('ppt'))
+
+            result = generate_thread(
+                face=adsk.fusion.BRepFace.cast(
+                    selection.selection(0).entity),
+                tooth_width_mm=tooth_width.value * 10.0,
+                tooth_height_mm=tooth_height.value * 10.0,
+                end_offset_mm=inputs.itemById('offset').value * 10.0,
+                samples_per_turn=max(4, int(samples.value)),
+                join_to_target=False,
+                feature_name='GeneratedThread',
+            )
+
+            thread_label = (
+                '外螺纹（螺杆）'
+                if result['thread_type'] == 'external'
+                else '内螺纹（螺母）')
+            message = (
+                f'✓ {thread_label}生成完成！\n\n'
+                f"【截面】L={result['tooth_width_mm']:.2f} mm  "
+                f"S={result['short_edge_mm']:.2f} mm  "
+                f"H={result['tooth_height_mm']:.2f} mm\n"
+                f"【螺旋】P={result['pitch_mm']:.2f} mm  "
+                f"转数={result['turns']}  "
+                f"高度={result['thread_length_mm']:.2f} mm\n"
+                '【结果】实体=1'
+            )
+            radius_mm = result['cylinder_radius_mm']
+            height_mm = result['tooth_height_mm']
+            if result['thread_type'] == 'external':
+                mating_diameter = 2 * radius_mm + 2 * height_mm
+                message += (
+                    '\n\n📌 配合螺母建议内径：\n'
+                    f'  圆柱外径（{2 * radius_mm:.1f} mm）+ '
+                    f'{2 * height_mm:.1f} mm（2 × H）+ 间隙\n'
+                    f'  = {mating_diameter:.1f} mm + 间隙')
+            else:
+                mating_diameter = 2 * radius_mm - 2 * height_mm
+                message += (
+                    '\n\n📌 配合螺杆建议外径：\n'
+                    f'  圆孔内径（{2 * radius_mm:.1f} mm）- '
+                    f'{2 * height_mm:.1f} mm（2 × H）- 间隙\n'
+                    f'  = {mating_diameter:.1f} mm - 间隙')
+            _ui.messageBox(message, '生成成功')
+        except:
+            _ui.messageBox(
+                traceback.format_exc(), '执行失败')
+
+    def _notify_legacy(self, args):
         try:
             inputs = adsk.core.CommandEventArgs.cast(args).command.commandInputs
             sel_inp = adsk.core.SelectionCommandInput.cast(inputs.itemById('face'))
