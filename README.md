@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.2.0.zip)
+[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.3.0.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -13,9 +13,10 @@
 ## Features
 
 - Generates both external bolt threads and internal nut/hole threads.
-- Uses a 3D-printing-friendly trapezoidal profile with fixed **45-degree flanks**.
+- Uses a 3D-printing-friendly trapezoidal profile with an adjustable **5°–45° flank angle**.
 - Automatically detects internal and external cylindrical faces.
-- Provides adjustable tooth width, thread height, sampling resolution, and end offset.
+- Provides adjustable tooth-root width, tooth height, flank angle, sampling resolution, and end offset.
+- Automatically calculates the tooth crest width and preserves a minimum `0.2 mm` crest flat to prevent profile self-intersection.
 - Shows the estimated helix length and spline-point count, with warnings for risky sampling settings.
 - Reports a suggested mating nut or bolt diameter after generation, including recommended print clearance.
 - Supports Autodesk Fusion on Windows and macOS.
@@ -88,11 +89,12 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **External thread (bolt):** the profile grows outward.
    - **Internal thread (nut):** the profile grows inward.
 4. Set the thread parameters:
-   - **Long edge L (tooth width):** axial width of the trapezoidal profile. Default: `3 mm`.
-   - **Trapezoid height H:** radial thread depth/height. Default: `1 mm`. The profile uses the same distance `H` in the axial direction at each side, producing a fixed **45° thread flank angle**.
+   - **Long edge L (tooth-root width):** axial width at the root of the trapezoidal tooth profile. Default: `3 mm`.
+   - **Trapezoid height H (tooth height):** radial height/depth of the thread tooth. Default: `1 mm`.
+   - **Flank angle α:** angle between either tooth flank and the thread axis. Adjustable from `5°` to `45°`.
    - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
-5. Review the automatically calculated short edge, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type.
+5. Review the automatically calculated **tooth crest width S (crest flat)**, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type. The profile-status area directly below the H and angle inputs reports any automatic correction.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
 
 ## Parameter rules
@@ -100,17 +102,20 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
 The add-in calculates:
 
 ```text
-Short edge S = L - 2H
-Pitch P      = L + S = 2(L - H)
+Axial inset per flank A = H / tan(α)
+Tooth crest width S     = L - 2A
+Pitch P                 = L + S = 2(L - A)
+Maximum H               = (L - 0.2 mm) × tan(α) / 2
 ```
 
-The trapezoidal tooth has a **45° flank on each side**. This angle is fixed by the script and is not an adjustable input. Here, 45° means the angle between either sloped tooth flank and the thread axis; equivalently, it is also 45° to the radial direction.
+`L` is the tooth-root width, `S` is the tooth crest width (crest flat), `H` is the radial tooth height, and `A` is the axial inset of each flank. Changing `H` or `α` recalculates `S` and the pitch. To keep a valid trapezoidal profile, `S` must remain at least `0.2 mm`. If the requested height would make it smaller, the add-in automatically reduces `H` to the maximum valid value while preserving the selected flank angle. This is a geometry safeguard, not a calculation error.
 
 Inputs must satisfy:
 
-- `L > 0`
+- `L > 0.2 mm`
 - `H > 0`
-- `L - 2H > 0`
+- `5° ≤ α ≤ 45°`
+- `S = L - 2H / tan(α) ≥ 0.2 mm`
 - For an internal thread, `H` must be smaller than the hole radius.
 
 The add-in reserves approximately one full turn of axial space. The generated number of turns may therefore be lower than the simple cylinder-length/pitch ratio.
@@ -146,6 +151,7 @@ result = thread_tool.generate_thread(
     join_to_target=True,
     feature_name='Lid_Internal_Thread',
     max_turns_per_sweep=4,
+    flank_angle_degrees=30,
 )
 print(result)
 ```
@@ -162,6 +168,7 @@ payload = {
     'join_to_target': True,
     'feature_name': 'Lid_Internal_Thread',
     'max_turns_per_sweep': 4,
+    'flank_angle_degrees': 30,
 }
 
 result = thread_tool.generate_thread_from_json(payload)
@@ -171,7 +178,7 @@ result = thread_tool.generate_thread_from_json(payload)
 string. Its result is a JSON-serializable dictionary containing:
 
 - detected thread type (`external` or `internal`);
-- tooth dimensions, short edge, and calculated pitch;
+- tooth-root width, tooth crest width, tooth height, flank angle, and calculated pitch;
 - turn count and generated thread length;
 - cylinder radius and height;
 - sampling and end-offset values;
@@ -184,7 +191,8 @@ string. Its result is a JSON-serializable dictionary containing:
 
 - `face` must be a true cylindrical BRep face.
 - Public API dimensions are expressed in millimetres.
-- `tooth_width_mm` must be greater than `2 * tooth_height_mm`.
+- `flank_angle_degrees` must be between `5` and `45` and defaults to `45`.
+- The calculated tooth crest width `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` must be at least `0.2 mm`.
 - `samples_per_turn` has a minimum effective value of `4`.
 - `max_turns_per_sweep` defaults to `4`. Long threads are swept in multiple
   sections to avoid Fusion kernel failures. The linked pitch formula remains
@@ -205,6 +213,7 @@ string. Its result is a JSON-serializable dictionary containing:
 
 - **The OK button is disabled:** select exactly one cylindrical face and verify the parameter rules above.
 - **Internal thread depth warning:** reduce `H` so it is smaller than the hole radius.
+- **H was reduced automatically:** the requested H and flank angle would make the tooth crest width smaller than `0.2 mm`; the add-in uses the largest safe H to prevent a self-intersecting profile.
 - **The command is missing:** run the add-in again from **Scripts and Add-Ins**, or restart Fusion.
 - **The icon does not update:** close and reopen the **Scripts and Add-Ins** dialog, or restart Fusion.
 - **The thread looks faceted:** increase **Points per turn**. Higher values produce more geometry and may take longer; the script caps the total helix samples at 400.

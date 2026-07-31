@@ -6,6 +6,19 @@ _ui       = None
 _handlers = []
 CMD_ID    = 'threadTool_v1'
 PRIVACY_URL = 'https://github.com/HookyMaster/ThreadFor3DPrinter/blob/master/docs/PRIVACY.md'
+MIN_FLANK_ANGLE_DEG = 5.0
+MAX_FLANK_ANGLE_DEG = 45.0
+PROFILE_TOLERANCE_CM = 1e-7
+MIN_SHORT_EDGE_CM = 0.02  # 0.2 mm; avoids a degenerate/self-intersecting profile
+
+
+def _profile_dimensions(L, H, angle_degrees):
+    """Return axial flank inset, short edge, and max H for the minimum S."""
+    tangent = math.tan(math.radians(angle_degrees))
+    flank_run = H / tangent
+    short_edge = L - 2.0 * flank_run
+    max_height = max(0.0, 0.5 * (L - MIN_SHORT_EDGE_CM) * tangent)
+    return flank_run, short_edge, max_height
 
 
 # ══════════════════════════════════════════════════════
@@ -66,11 +79,11 @@ def _radial_dir(ax):
     return u
 
 
-def _build_helix(face, L, H, pts_per_turn, offset_cm=0):
+def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0):
     """生成螺旋线点列。offset_cm: 螺旋线起点距圆柱底端的偏移"""
     # Generate helix point sequence. offset_cm: offset from cylinder bottom to helix start
     radius, height, h_min, ax, origin = _get_cyl_info(face)
-    P = 2.0 * (L - H)
+    P = 2.0 * (L - flank_run)
     usable = height - offset_cm
     N = max(1, int(usable / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
     # Reserve one full turn of space
@@ -93,7 +106,8 @@ def _build_helix(face, L, H, pts_per_turn, offset_cm=0):
     return pts, N, hh, P, radius
 
 
-def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
+def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
+                      start_pt, is_external):
     """在路径垂面上画梯形截面。
     is_external=True  → 向外长肉（外螺纹）
     is_external=False → 向内长肉（内螺纹）
@@ -117,6 +131,8 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     rad_vec.normalize()
 
     sign = 1.0 if is_external else -1.0
+    flank_run, short_len, _ = _profile_dimensions(
+        L, H, angle_degrees)
 
     # 梯形四点（世界坐标）
     # Four trapezoid points (world coordinates)
@@ -124,13 +140,13 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     A_world = adsk.core.Point3D.create(
         B_world.x + L * ax.x, B_world.y + L * ax.y, B_world.z + L * ax.z)
     P_bot_world = adsk.core.Point3D.create(
-        B_world.x + sign * H * rad_vec.x + H * ax.x,
-        B_world.y + sign * H * rad_vec.y + H * ax.y,
-        B_world.z + sign * H * rad_vec.z + H * ax.z)
+        B_world.x + sign * H * rad_vec.x + flank_run * ax.x,
+        B_world.y + sign * H * rad_vec.y + flank_run * ax.y,
+        B_world.z + sign * H * rad_vec.z + flank_run * ax.z)
     P_top_world = adsk.core.Point3D.create(
-        A_world.x + sign * H * rad_vec.x - H * ax.x,
-        A_world.y + sign * H * rad_vec.y - H * ax.y,
-        A_world.z + sign * H * rad_vec.z - H * ax.z)
+        A_world.x + sign * H * rad_vec.x - flank_run * ax.x,
+        A_world.y + sign * H * rad_vec.y - flank_run * ax.y,
+        A_world.z + sign * H * rad_vec.z - flank_run * ax.z)
 
     sketch = root.sketches.add(perp_plane)
     sketch.name = 'ThreadProfile'
@@ -146,7 +162,6 @@ def _create_trapezoid(root, perp_plane, face, L, H, start_pt, is_external):
     lines.addByTwoPoints(P_top_sk, P_bot_sk)
     lines.addByTwoPoints(P_bot_sk, B_sk)
 
-    short_len = max(0.0, L - 2.0 * H)
     return sketch, short_len
 
 
@@ -169,7 +184,7 @@ def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None,
 def generate_thread(face, tooth_width_mm, tooth_height_mm,
                     end_offset_mm=0.0, samples_per_turn=16,
                     join_to_target=False, feature_name='GeneratedThread',
-                    max_turns_per_sweep=4):
+                    max_turns_per_sweep=4, flank_angle_degrees=45.0):
     """Generate a printable trapezoidal thread without opening the GUI.
 
     Args:
@@ -181,6 +196,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         join_to_target: Join the generated thread body to the selected body.
         feature_name: Browser name for generated sketches/features.
         max_turns_per_sweep: Maximum turns in each sweep segment.
+        flank_angle_degrees: Angle between either flank and the thread axis.
 
     Returns:
         A JSON-serialisable dict describing the generated thread.
@@ -200,10 +216,15 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     offset_cm = float(end_offset_mm) / 10.0
     pts_per_turn = max(4, int(samples_per_turn))
     segment_turn_limit = max(1, int(max_turns_per_sweep))
+    angle_degrees = float(flank_angle_degrees)
     if L_cm <= 0 or H_cm <= 0:
         raise ValueError('tooth_width_mm and tooth_height_mm must be positive')
-    if L_cm - 2.0 * H_cm <= 0:
-        raise ValueError('tooth_width_mm must be greater than 2 * tooth_height_mm')
+    if not MIN_FLANK_ANGLE_DEG <= angle_degrees <= MAX_FLANK_ANGLE_DEG:
+        raise ValueError('flank_angle_degrees must be between 5 and 45 degrees')
+    flank_run_cm, short_cm, _ = _profile_dimensions(
+        L_cm, H_cm, angle_degrees)
+    if short_cm < MIN_SHORT_EDGE_CM - PROFILE_TOLERANCE_CM:
+        raise ValueError('short edge must be at least 0.2 mm')
     if offset_cm < 0:
         raise ValueError('end_offset_mm must be non-negative')
 
@@ -226,7 +247,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         comp = target_body.parentComponent
 
     pts, turns, helix_height, pitch, radius = _build_helix(
-        face, L_cm, H_cm, pts_per_turn, offset_cm)
+        face, L_cm, flank_run_cm, pts_per_turn, offset_cm)
     if turns < 1 or helix_height <= 0:
         raise ValueError('Selected cylinder is too short for the requested thread and offset')
 
@@ -269,7 +290,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     perp_plane.name = safe_name + '_ProfilePlane'
 
     sketch_trap, short_cm = _create_trapezoid(
-        comp, perp_plane, face, L_cm, H_cm, pts.item(0), is_external)
+        comp, perp_plane, face, L_cm, H_cm, angle_degrees,
+        pts.item(0), is_external)
     sketch_trap.name = safe_name + '_Profile'
     if sketch_trap.profiles.count == 0:
         raise RuntimeError('Thread profile did not form a closed region')
@@ -353,6 +375,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         'tooth_width_mm': L_cm * 10.0,
         'short_edge_mm': short_cm * 10.0,
         'tooth_height_mm': H_cm * 10.0,
+        'flank_angle_degrees': angle_degrees,
         'pitch_mm': pitch * 10.0,
         'turns': turns,
         'thread_length_mm': helix_height * 10.0,
@@ -377,7 +400,7 @@ def generate_thread_from_json(payload):
     Optional fields:
         tooth_width_mm, tooth_height_mm, end_offset_mm,
         samples_per_turn, join_to_target, feature_name,
-        max_turns_per_sweep
+        max_turns_per_sweep, flank_angle_degrees
     """
     if isinstance(payload, str):
         payload = json.loads(payload)
@@ -407,6 +430,7 @@ def generate_thread_from_json(payload):
         join_to_target=bool(payload.get('join_to_target', False)),
         feature_name=payload.get('feature_name', 'GeneratedThread'),
         max_turns_per_sweep=payload.get('max_turns_per_sweep', 4),
+        flank_angle_degrees=payload.get('flank_angle_degrees', 45.0),
     )
 
 
@@ -436,6 +460,12 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 adsk.core.ValueInput.createByString('3 mm'))
             inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
                 adsk.core.ValueInput.createByString('1 mm'))
+            inputs.addValueInput('flank_angle', '牙侧角度（5°–45°）', 'deg',
+                adsk.core.ValueInput.createByString('45 deg'))
+            inputs.addTextBoxCommandInput(
+                'profile_status', '截面状态',
+                '<b>短边 S: 1.000 mm</b><br/>'
+                '<font color="green">当前截面为梯形</font>', 2, True)
 
             inputs.addTextBoxCommandInput('sep2', '',
                 '<b>── 路径参数 ──</b>', 1, True)
@@ -461,6 +491,11 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 
 class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
+    def __init__(self):
+        super().__init__()
+        self._syncing_profile = False
+        self._profile_warning = ''
+
     def notify(self, args):
         try:
             ea       = adsk.core.InputChangedEventArgs.cast(args)
@@ -468,19 +503,84 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
             sel_inp  = adsk.core.SelectionCommandInput.cast(all_ins.itemById('face'))
             L_inp    = adsk.core.ValueCommandInput.cast(all_ins.itemById('long_L'))
             H_inp    = adsk.core.ValueCommandInput.cast(all_ins.itemById('trap_H'))
+            angle_inp = adsk.core.ValueCommandInput.cast(
+                all_ins.itemById('flank_angle'))
             ppt_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('ppt'))
             off_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('offset'))
             calc_box = adsk.core.TextBoxCommandInput.cast(all_ins.itemById('calc_info'))
+            profile_box = adsk.core.TextBoxCommandInput.cast(
+                all_ins.itemById('profile_status'))
+
+            changed_id = ea.input.id if ea.input else ''
+            if (not self._syncing_profile and
+                    changed_id in ('long_L', 'trap_H', 'flank_angle')):
+                self._syncing_profile = True
+                try:
+                    requested_angle = math.degrees(angle_inp.value)
+                    angle_deg = min(MAX_FLANK_ANGLE_DEG,
+                                    max(MIN_FLANK_ANGLE_DEG,
+                                        requested_angle))
+                    if abs(angle_deg - requested_angle) > 1e-7:
+                        angle_inp.value = math.radians(angle_deg)
+                        self._profile_warning = (
+                            '⚠ 牙侧角度仅允许 5°–45°，已自动调整为 '
+                            f'{angle_deg:.1f}°。')
+                    else:
+                        self._profile_warning = ''
+
+                    L_now = L_inp.value
+                    H_now = H_inp.value
+                    if L_now > MIN_SHORT_EDGE_CM and H_now > 0:
+                        _, short_now, max_height = _profile_dimensions(
+                            L_now, H_now, angle_deg)
+                        if (short_now <
+                                MIN_SHORT_EDGE_CM - PROFILE_TOLERANCE_CM):
+                            H_inp.value = max_height
+                            self._profile_warning = (
+                                '⚠ 当前高度超过该角度允许的最大值，'
+                                f'已自动将 H 调整为 {max_height*10:.3f} mm。'
+                                '短边已限制为最小值 0.200 mm，'
+                                '以避免截面自相交。')
+                        elif abs(short_now - MIN_SHORT_EDGE_CM) <= (
+                                PROFILE_TOLERANCE_CM):
+                            H_inp.value = max_height
+                            self._profile_warning = (
+                                '⚠ 短边已达到最小值 0.200 mm，'
+                                '继续增大 H 会导致截面自相交。')
+                finally:
+                    self._syncing_profile = False
 
             has_face = sel_inp.selectionCount > 0
             L_val    = L_inp.value
             H_val    = H_inp.value
+            angle_deg = math.degrees(angle_inp.value)
+            flank_run, raw_S, max_height = _profile_dimensions(
+                L_val, H_val, angle_deg)
             ppt      = max(4, int(ppt_inp.value))
             offset   = off_inp.value
 
-            S = max(0.0, L_val - 2.0 * H_val)
+            S = max(0.0, raw_S)
             P = L_val + S
             lines = []
+
+            if L_val <= MIN_SHORT_EDGE_CM or H_val <= 0:
+                profile_box.formattedText = (
+                    f'<b>短边 S: {S*10:.3f} mm</b><br/>'
+                    '<font color="red"><b>⚠ L 必须大于 0.2 mm，'
+                    '且 H 必须大于 0。</b></font>')
+            elif self._profile_warning:
+                profile_box.formattedText = (
+                    f'<b>短边 S: {S*10:.3f} mm</b><br/>'
+                    f'<font color="orange"><b>{self._profile_warning}</b></font>')
+            elif S <= MIN_SHORT_EDGE_CM + PROFILE_TOLERANCE_CM:
+                profile_box.formattedText = (
+                    '<b>短边 S: 0.200 mm</b><br/>'
+                    '<font color="orange"><b>⚠ 已达到最小短边限制；'
+                    '继续增大 H 会导致截面自相交。</b></font>')
+            else:
+                profile_box.formattedText = (
+                    f'<b>短边 S: {S*10:.3f} mm</b><br/>'
+                    '<font color="green">当前截面为梯形</font>')
 
             if has_face and P > 0:
                 face = adsk.fusion.BRepFace.cast(sel_inp.selection(0).entity)
@@ -506,6 +606,8 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>短边 S:</b> {S*10:.2f} mm')
                 lines.append(f'<b>梯形高度 H:</b> {H_val*10:.2f} mm　'
                              f'<b>螺距 P:</b> {P*10:.2f} mm')
+                lines.append(f'<b>牙侧角度:</b> {angle_deg:.2f}°　'
+                             f'<b>H 最大值:</b> {max_height*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
                 lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}')
@@ -517,6 +619,10 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
                 lines.append('<i>选择圆柱面后自动识别内外螺纹...</i>')
+
+            if self._profile_warning:
+                lines.append(
+                    f'<font color="orange">{self._profile_warning}</font>')
 
             calc_box.formattedText = '<br/>'.join(lines)
         except:
@@ -531,13 +637,19 @@ class MyValidateHandler(adsk.core.ValidateInputsEventHandler):
             sel   = adsk.core.SelectionCommandInput.cast(inputs.itemById('face'))
             L_inp = adsk.core.ValueCommandInput.cast(inputs.itemById('long_L'))
             H_inp = adsk.core.ValueCommandInput.cast(inputs.itemById('trap_H'))
+            angle_inp = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('flank_angle'))
 
             L_val = L_inp.value
             H_val = H_inp.value
+            angle_deg = math.degrees(angle_inp.value)
+            _, short_edge, _ = _profile_dimensions(
+                L_val, H_val, angle_deg)
             valid = (
                 sel.selectionCount == 1
-                and L_val > 0 and H_val > 0
-                and (L_val - 2.0 * H_val) > 0
+                and L_val > MIN_SHORT_EDGE_CM and H_val > 0
+                and MIN_FLANK_ANGLE_DEG <= angle_deg <= MAX_FLANK_ANGLE_DEG
+                and short_edge >= MIN_SHORT_EDGE_CM - PROFILE_TOLERANCE_CM
             )
 
             # 内螺纹额外校验：H < radius
@@ -566,6 +678,8 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 inputs.itemById('long_L'))
             tooth_height = adsk.core.ValueCommandInput.cast(
                 inputs.itemById('trap_H'))
+            flank_angle = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('flank_angle'))
             samples = adsk.core.ValueCommandInput.cast(
                 inputs.itemById('ppt'))
 
@@ -578,6 +692,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 samples_per_turn=max(4, int(samples.value)),
                 join_to_target=False,
                 feature_name='GeneratedThread',
+                flank_angle_degrees=math.degrees(flank_angle.value),
             )
 
             thread_label = (
@@ -589,6 +704,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f"【截面】L={result['tooth_width_mm']:.2f} mm  "
                 f"S={result['short_edge_mm']:.2f} mm  "
                 f"H={result['tooth_height_mm']:.2f} mm\n"
+                f"牙侧角度={result['flank_angle_degrees']:.2f}°\n"
                 f"【螺旋】P={result['pitch_mm']:.2f} mm  "
                 f"转数={result['turns']}  "
                 f"高度={result['thread_length_mm']:.2f} mm\n"
@@ -668,7 +784,8 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             # ── 步骤3：梯形截面 ──
             # ── Step 3: Trapezoid cross-section ──
             sketch_trap, short_cm = _create_trapezoid(
-                comp, perp_plane, face, L_cm, H_cm, pts.item(0), is_external)
+                comp, perp_plane, face, L_cm, H_cm, 45.0,
+                pts.item(0), is_external)
 
             # ── 步骤4：获取轮廓 ──
             # ── Step 4: Get profile ──

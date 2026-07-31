@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.2.0.zip)
+[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v1.3.0.zip)
 
 <img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
 
@@ -13,9 +13,10 @@
 ## 主要功能
 
 - 同时支持螺杆外螺纹和螺母/圆孔内螺纹。
-- 使用适合 3D 打印的梯形牙型，两侧为固定 **45° 牙侧角**。
+- 使用适合 3D 打印的梯形牙型，**牙侧角可在 5°–45° 范围内调整**。
 - 自动识别内、外圆柱面。
-- 支持调整齿宽、牙高、采样精度和端面偏移。
+- 支持调整牙底宽度、牙高、牙侧角、采样精度和端面偏移。
+- 自动计算牙顶宽度，并保留最小 `0.2 mm` 牙顶平宽，避免截面自相交。
 - 显示估算的螺旋总长和样条线点数，并对高风险采样设置给出提示。
 - 生成完成后给出配合螺母或螺杆的建议直径及打印间隙。
 - 支持 Windows 和 macOS 上的 Autodesk Fusion。
@@ -88,11 +89,12 @@ ThreadFor3DPrinter/
    - **外螺纹（螺杆）**：梯形牙型向外生长。
    - **内螺纹（螺母）**：梯形牙型向内生长。
 4. 设置螺纹参数：
-   - **长边 L（齿宽）**：梯形截面沿轴向的长边宽度，默认 `3 mm`。
-   - **梯形高度 H（径向牙高）**：螺纹径向高度/深度，默认 `1 mm`。牙型每侧的轴向退让距离同样为 `H`，因此形成固定的 **45° 螺纹牙侧角**。
+   - **长边 L（牙底宽度）**：梯形牙型根部沿轴向的宽度，默认 `3 mm`。
+   - **梯形高度 H（牙高）**：螺纹牙型的径向高度/深度，默认 `1 mm`。
+   - **牙侧角 α**：牙侧面与螺纹轴线之间的夹角，可在 `5°–45°` 范围内调整。
    - **每圈采样点数**：螺旋线的采样精度，默认 `16`，最小值为 `4`。
    - **端面偏移**：从圆柱端面到螺旋线起点的距离，默认 `0 mm`。
-5. 检查工具自动计算的短边、螺距、圈数、螺旋高度和总长、样条线点数、圆柱尺寸及内外螺纹类型。
+5. 检查工具自动计算的**牙顶宽度 S（牙顶平宽）**、螺距、圈数、螺旋高度和总长、样条线点数、圆柱尺寸及内外螺纹类型。H 和牙侧角下方的“截面状态”会直接显示自动修正提示。
 6. 点击 **确定**。工具会创建螺旋路径、梯形截面，并扫掠生成螺纹实体。
 
 ## 参数约束
@@ -100,17 +102,20 @@ ThreadFor3DPrinter/
 工具按以下公式计算：
 
 ```text
-短边 S = L - 2H
-螺距 P = L + S = 2(L - H)
+单侧轴向退让量 A = H / tan(α)
+牙顶宽度 S       = L - 2A
+螺距 P           = L + S = 2(L - A)
+最大牙高 H       = (L - 0.2 mm) × tan(α) / 2
 ```
 
-梯形螺纹的左右两侧牙面均为 **45°**。该角度由脚本固定，不能通过输入参数调整。这里的 45° 是指倾斜牙侧面与螺纹轴线之间的夹角；它与径向方向之间的夹角同样为 45°。
+`L` 为牙底宽度，`S` 为牙顶宽度（牙顶平宽），`H` 为径向牙高，`A` 为每侧牙面的轴向退让量。修改 `H` 或 `α` 后，工具会重新计算 `S` 和螺距。为保证梯形牙型有效，`S` 最小为 `0.2 mm`；如果输入的牙高会使牙顶宽度低于该值，工具会在保持所选牙侧角的前提下，将 `H` 自动降低到允许的最大值。自动降低 `H` 不是程序出错，而是为避免牙型截面自相交而采取的几何保护。
 
 参数必须满足：
 
-- `L > 0`
+- `L > 0.2 mm`
 - `H > 0`
-- `L - 2H > 0`
+- `5° ≤ α ≤ 45°`
+- `S = L - 2H / tan(α) ≥ 0.2 mm`
 - 生成内螺纹时，`H` 必须小于圆孔半径。
 
 工具会在轴向预留大约一整圈的空间，因此实际生成圈数可能小于“圆柱长度 ÷ 螺距”的简单计算结果。
@@ -145,6 +150,7 @@ result = thread_tool.generate_thread(
     join_to_target=True,
     feature_name='Lid_Internal_Thread',
     max_turns_per_sweep=4,
+    flank_angle_degrees=30,
 )
 print(result)
 ```
@@ -161,6 +167,7 @@ payload = {
     'join_to_target': True,
     'feature_name': 'Lid_Internal_Thread',
     'max_turns_per_sweep': 4,
+    'flank_angle_degrees': 30,
 }
 
 result = thread_tool.generate_thread_from_json(payload)
@@ -170,7 +177,7 @@ result = thread_tool.generate_thread_from_json(payload)
 返回值是可直接序列化为 JSON 的字典，包含：
 
 - 检测到的螺纹类型（`external` 或 `internal`）；
-- 牙型尺寸、短边长度和联动计算出的螺距；
+- 牙底宽度、牙顶宽度、牙高、牙侧角和联动计算出的螺距；
 - 圈数和实际生成的螺纹长度；
 - 圆柱半径和高度；
 - 采样数及端面偏移；
@@ -183,7 +190,8 @@ result = thread_tool.generate_thread_from_json(payload)
 
 - `face` 必须是真实的圆柱 BRep 面。
 - 公共 API 的尺寸单位均为毫米。
-- `tooth_width_mm` 必须大于 `2 * tooth_height_mm`。
+- `flank_angle_degrees` 必须在 `5` 到 `45` 之间，默认值为 `45`。
+- 计算得到的牙顶宽度 `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` 必须至少为 `0.2 mm`。
 - `samples_per_turn` 的最小有效值为 `4`。
 - `max_turns_per_sweep` 默认为 `4`。长螺纹采用分段扫掠，以避免
   Fusion 几何内核在长路径上失败；螺距联动公式保持不变。
@@ -199,6 +207,7 @@ result = thread_tool.generate_thread_from_json(payload)
 
 - **“确定”按钮不可用：** 确认只选择了一个圆柱面，并检查参数是否满足上述约束。
 - **提示内螺纹牙高错误：** 减小 `H`，确保它小于圆孔半径。
+- **H 被自动降低：** 当前 H 与牙侧角会使牙顶宽度小于 `0.2 mm`；工具采用允许的最大安全牙高，以避免截面自相交。
 - **工具栏中没有命令：** 在“脚本和附加模块”中重新运行附加模块，或重启 Fusion。
 - **图标没有更新：** 关闭并重新打开“脚本和附加模块”窗口，或重启 Fusion。
 - **螺纹看起来有棱角：** 增加“每圈采样点数”。数值越高，几何量和计算时间越大；脚本将螺旋线总采样数限制为 4000。
