@@ -575,7 +575,7 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 adsk.core.ValueInput.createByString('0 mm'))
 
             join_inp = inputs.addBoolValueInput(
-                'join_target', '合并到圆柱体', True, '', False)
+                'join_target', '合并到圆柱体', True, '', True)
             join_inp.tooltip = '将生成的螺纹与所选圆柱体合并为一个实体'
             join_inp.tooltipDescription = (
                 '勾选后，螺纹体会通过布尔合并与所选圆柱体合并为单一实体。<br/><br/>'
