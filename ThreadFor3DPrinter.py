@@ -10,6 +10,20 @@ MIN_FLANK_ANGLE_DEG = 5.0
 MAX_FLANK_ANGLE_DEG = 45.0
 PROFILE_TOLERANCE_CM = 1e-7
 MIN_SHORT_EDGE_CM = 0.02  # 0.2 mm; avoids a degenerate/self-intersecting profile
+# Maximum allowed deviation between the fitted helix spline and the true
+# cylinder surface, expressed as a fraction of the tooth height H.  The sweep
+# guides the profile along the cylinder face; if the path strays further than
+# roughly H from the surface the profile can no longer follow the guide and
+# the kernel rejects the sweep (ASM_SWEEP_ILLEGAL_SURFACE).  0.5 gives a
+# comfortable safety margin while keeping point counts low.
+HELIX_DEVIATION_TOLERANCE_RATIO = 0.5
+MIN_SAMPLES_PER_TURN = 16
+MAX_SAMPLES_PER_TURN = 360
+# Hard cap on the total number of spline points for one helix. When the
+# adaptive per-turn sampling would exceed this for a long thread, the turn
+# count is reduced instead of the sampling density, so the path always stays
+# close to the cylinder surface.
+MAX_HELIX_POINTS = 20000
 
 
 def _profile_dimensions(L, H, angle_degrees):
@@ -19,6 +33,52 @@ def _profile_dimensions(L, H, angle_degrees):
     short_edge = L - 2.0 * flank_run
     max_height = max(0.0, 0.5 * (L - MIN_SHORT_EDGE_CM) * tangent)
     return flank_run, short_edge, max_height
+
+
+def _samples_per_turn_for_radius(radius_cm, requested, tooth_height_mm):
+    """Return the effective samples-per-turn for a cylinder radius.
+
+    A circle of radius R sampled at n points per turn has a maximum chord-to-arc
+    (sagitta) deviation of R * (1 - cos(pi / n)). The sweep guides the profile
+    along the cylinder face, so this deviation must stay within
+    HELIX_DEVIATION_TOLERANCE_RATIO * tooth_height_mm or the kernel rejects the
+    sweep. We raise the sample count until the sagitta is within tolerance. The
+    caller's requested value is honoured as a lower bound.
+    """
+    radius_mm = radius_cm * 10.0
+    base = max(MIN_SAMPLES_PER_TURN, int(requested))
+    if radius_mm <= 0 or tooth_height_mm <= 0:
+        return base
+    tol_mm = HELIX_DEVIATION_TOLERANCE_RATIO * tooth_height_mm
+    # sagitta <= tol  =>  n >= pi / acos(1 - tol / R)
+    ratio = tol_mm / radius_mm
+    if ratio >= 1.0:
+        return base  # tiny radius; tolerance already met
+    required = math.pi / math.acos(max(-1.0, min(1.0, 1.0 - ratio)))
+    required = int(math.ceil(required))
+    return int(max(base, min(required, MAX_SAMPLES_PER_TURN)))
+
+
+def _plan_helix_sampling(radius_cm, requested_ppt, turns, tooth_height_mm):
+    """Plan effective sampling for a helix of the given radius and turn count.
+
+    Returns a tuple (eff_ppt, turns, n_points, capped):
+      - eff_ppt: effective samples per turn (adaptive, never reduced for budget)
+      - turns: the number of turns that fit within the point budget
+      - n_points: total spline point count (excluding the closing duplicate)
+      - capped: True if turns were reduced because of the point budget
+
+    The sampling density is never sacrificed to fit the budget. If the adaptive
+    per-turn density would push the total beyond MAX_HELIX_POINTS, the turn
+    count is reduced so every retained turn keeps full precision.
+    """
+    eff_ppt = _samples_per_turn_for_radius(radius_cm, requested_ppt, tooth_height_mm)
+    capped = False
+    if turns > 0 and eff_ppt > 0 and turns * eff_ppt > MAX_HELIX_POINTS:
+        turns = max(1, int(MAX_HELIX_POINTS // eff_ppt))
+        capped = True
+    n_points = max(4, int(turns * eff_ppt)) if turns > 0 else 0
+    return eff_ppt, turns, n_points, capped
 
 
 # ══════════════════════════════════════════════════════
@@ -79,7 +139,7 @@ def _radial_dir(ax):
     return u
 
 
-def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0):
+def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0, tooth_height_mm=1.0):
     """生成螺旋线点列。offset_cm: 螺旋线起点距圆柱底端的偏移"""
     # Generate helix point sequence. offset_cm: offset from cylinder bottom to helix start
     radius, height, h_min, ax, origin = _get_cyl_info(face)
@@ -87,10 +147,14 @@ def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0):
     usable = height - offset_cm
     N = max(1, int(usable / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
     # Reserve one full turn of space
+    # Adapt sample density to the radius; if the point budget is exceeded the
+    # turn count is reduced (not the sampling density) so the path always hugs
+    # the cylinder surface.
+    eff_ppt, N, n_pts, capped = _plan_helix_sampling(
+        radius, pts_per_turn, N, tooth_height_mm)
     hh = N * P
     h_start = h_min + offset_cm       # 偏移后的起始高度
     # Adjusted starting height after offset
-    n_pts = min(max(4, int(N * pts_per_turn)), 4000)
     u = _radial_dir(ax)
     v = ax.crossProduct(u)
     v.normalize()
@@ -247,7 +311,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         comp = target_body.parentComponent
 
     pts, turns, helix_height, pitch, radius = _build_helix(
-        face, L_cm, flank_run_cm, pts_per_turn, offset_cm)
+        face, L_cm, flank_run_cm, pts_per_turn, offset_cm,
+        tooth_height_mm=H_cm * 10.0)
     if turns < 1 or helix_height <= 0:
         raise ValueError('Selected cylinder is too short for the requested thread and offset')
 
@@ -269,11 +334,16 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     sketch_helix.isComputeDeferred = True
     segment_splines = []
 
+    # Points are laid out uniformly across all turns, so map turn boundaries
+    # to point indices proportionally. Indexing by the requested pts_per_turn
+    # would be wrong once adaptive sampling raises the effective density.
+    total_points = pts.count - 1
     for segment_index in range(segment_count):
         first_turn = segment_index * segment_turn_limit
         last_turn = min(turns, first_turn + segment_turn_limit)
-        first_point = first_turn * pts_per_turn
-        last_point = min(pts.count - 1, last_turn * pts_per_turn)
+        first_point = int(round(first_turn / turns * total_points))
+        last_point = min(total_points,
+                         int(round(last_turn / turns * total_points)))
         segment_points = adsk.core.ObjectCollection.create()
         for point_index in range(first_point, last_point + 1):
             segment_points.add(pts.item(point_index))
@@ -361,12 +431,17 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         result_body = target_body
         joined = True
 
-    timeline_end_index = design.timeline.count - 1
-    timeline_group = design.timeline.timelineGroups.add(
-        timeline_start_index, timeline_end_index)
-    if not timeline_group:
-        raise RuntimeError('Failed to create timeline group')
-    timeline_group.name = safe_name + '_Generation'
+    timeline_group_name = ''
+    try:
+        timeline_end_index = design.timeline.count - 1
+        if timeline_end_index >= timeline_start_index:
+            timeline_group = design.timeline.timelineGroups.add(
+                timeline_start_index, timeline_end_index)
+            if timeline_group:
+                timeline_group.name = safe_name + '_Generation'
+                timeline_group_name = timeline_group.name
+    except Exception:
+        pass  # timeline grouping is cosmetic; never fail the generation
 
     app.activeViewport.fit()
     return {
@@ -386,7 +461,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         'cylinder_radius_mm': radius * 10.0,
         'cylinder_height_mm': cylinder_height * 10.0,
         'joined_to_target': joined,
-        'timeline_group_name': timeline_group.name,
+        'timeline_group_name': timeline_group_name,
         'result_body_token': result_body.entityToken,
     }
 
@@ -593,8 +668,9 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 # Reserve one full turn of space
                 if N * P > height - offset and N > 1:
                     N -= 1
+                eff_ppt, N, n_pts, capped = _plan_helix_sampling(
+                    radius, ppt, N, H_val * 10.0)
                 act_h = N * P
-                n_pts = min(max(4, int(N * ppt)), 400) if N > 0 else 0
                 n_total = n_pts + 1 if N > 0 else 0
                 # 螺旋路径总长度（考虑螺距）
                 circle_mm = 2 * math.pi * radius * 10  # 每圈周长 mm
@@ -610,11 +686,9 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                              f'<b>H 最大值:</b> {max_height*10:.2f} mm')
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
-                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}')
-                if n_pts > 300:
-                    lines.append('<font color="orange">⚠ 样条线点数过多(>300)，曲线可能过冲导致扫掠失败，建议降低采样</font>')
-                elif N > 0 and n_pts < N * 4:
-                    lines.append('<font color="orange">⚠ 每圈采样点过少(<4)，螺纹形状可能不精确，建议提高采样</font>')
+                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}（每圈 {eff_ppt} 点）')
+                if capped:
+                    lines.append('<font color="orange">⚠ 圈数已达样条点数预算上限，为保证路径贴合圆柱已自动减少圈数；如需更多圈数请增大端面偏移以外的可用长度或降低每圈采样</font>')
                 if not is_ext and H_val >= radius:
                     lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
             else:
@@ -756,7 +830,8 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             # ── 步骤1：螺旋线路径 ──
             # ── Step 1: Helix path ──
             pts, turns, helix_height, P, radius = _build_helix(
-                face, L_cm, H_cm, pts_per_turn, offset_cm)
+                face, L_cm, H_cm, pts_per_turn, offset_cm,
+                tooth_height_mm=H_cm * 10.0)
             # 如果是子组件，将全局坐标转为局部坐标
             if occ:
                 inv = occ.transform2.copy()

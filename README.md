@@ -92,7 +92,7 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **Long edge L (tooth-root width):** axial width at the root of the trapezoidal tooth profile. Default: `3 mm`.
    - **Trapezoid height H (tooth height):** radial height/depth of the thread tooth. Default: `1 mm`.
    - **Flank angle α:** angle between either tooth flank and the thread axis. Adjustable from `5°` to `45°`.
-   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`.
+   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`. The add-in automatically raises this value for large diameters so the helix path stays within half the tooth height of the cylinder surface; the value you enter is used as a lower bound.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
 5. Review the automatically calculated **tooth crest width S (crest flat)**, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type. The profile-status area directly below the H and angle inputs reports any automatic correction.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
@@ -193,7 +193,14 @@ string. Its result is a JSON-serializable dictionary containing:
 - Public API dimensions are expressed in millimetres.
 - `flank_angle_degrees` must be between `5` and `45` and defaults to `45`.
 - The calculated tooth crest width `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` must be at least `0.2 mm`.
-- `samples_per_turn` has a minimum effective value of `4`.
+- `samples_per_turn` has a minimum effective value of `4`. It is used as a
+  lower bound: for large cylinder radii the add-in automatically raises it so
+  the fitted helix stays within half the tooth height of the cylinder surface,
+  which keeps the sweep on the guide face and avoids `ASM_SWEEP_ILLEGAL_SURFACE`. The
+  effective value is clamped to a maximum of `360` per turn. If the adaptive
+  per-turn density would push the total sample count beyond `20000`, the turn
+  count is reduced instead of the sampling density, so every retained turn
+  keeps full precision.
 - `max_turns_per_sweep` defaults to `4`. Long threads are swept in multiple
   sections to avoid Fusion kernel failures. The linked pitch formula remains
   unchanged.
@@ -201,7 +208,10 @@ string. Its result is a JSON-serializable dictionary containing:
   profile sketch. Later sweep sections continue from the previous section's
   end face while retaining the cylindrical guide surface.
 - All features created by one successful generation call are collected in one
-  Fusion timeline group named `<feature_name>_Generation`.
+  Fusion timeline group named `<feature_name>_Generation` when Fusion allows
+  grouping. If grouping is not possible (for example, the affected timeline
+  range already contains a group), generation still succeeds and the group is
+  simply skipped.
 - `join_to_target=False` preserves the GUI's legacy behaviour and returns a
   separate thread body.
 - `join_to_target=True` joins the generated thread to the selected body and
@@ -216,8 +226,9 @@ string. Its result is a JSON-serializable dictionary containing:
 - **H was reduced automatically:** the requested H and flank angle would make the tooth crest width smaller than `0.2 mm`; the add-in uses the largest safe H to prevent a self-intersecting profile.
 - **The command is missing:** run the add-in again from **Scripts and Add-Ins**, or restart Fusion.
 - **The icon does not update:** close and reopen the **Scripts and Add-Ins** dialog, or restart Fusion.
-- **The thread looks faceted:** increase **Points per turn**. Higher values produce more geometry and may take longer; the script caps the total helix samples at 400.
-- **Sweep failure:** use a simpler cylindrical body, reduce the thread dimensions, increase available axial length, or increase the end offset.
+- **The thread looks faceted:** increase **Points per turn**. Higher values produce more geometry and may take longer; the total helix sample count is capped at 20000, and beyond that the turn count is reduced rather than the sampling density.
+- **Fewer turns than expected on a long, large-diameter thread:** the adaptive per-turn sampling reached the 20000-point budget, so the turn count was reduced to keep the path hugging the cylinder. Lower **Points per turn** slightly, or give the thread more usable length.
+- **Sweep failure (ASM_SWEEP_ILLEGAL_SURFACE):** this usually means the helix path cannot stay close enough to the cylinder. The add-in adapts sampling to the radius automatically; if it still happens, lower **Points per turn** slightly or shorten the thread (smaller height or larger end offset).
 
 ## Uninstalling
 
