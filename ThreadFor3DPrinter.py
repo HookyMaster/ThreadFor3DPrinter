@@ -10,6 +10,10 @@ MIN_FLANK_ANGLE_DEG = 5.0
 MAX_FLANK_ANGLE_DEG = 45.0
 PROFILE_TOLERANCE_CM = 1e-7
 MIN_SHORT_EDGE_CM = 0.02  # 0.2 mm; avoids a degenerate/self-intersecting profile
+# Recommended radial clearance (per side, mm) for 3D-printed mating threads.
+# FDM prints typically need 0.2-0.4 mm per side to assemble without force;
+# 0.3 mm is a common middle ground. Shown as a suggestion in the result dialog.
+RECOMMENDED_CLEARANCE_MM = 0.3
 # Maximum allowed deviation between the fitted helix spline and the true
 # cylinder surface, expressed as a fraction of the tooth height H.  The sweep
 # guides the profile along the cylinder face; if the path strays further than
@@ -858,20 +862,28 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             )
             radius_mm = result['cylinder_radius_mm']
             height_mm = result['tooth_height_mm']
+            clr = RECOMMENDED_CLEARANCE_MM
+            dia_clr = 2 * clr
             if result['thread_type'] == 'external':
-                mating_diameter = 2 * radius_mm + 2 * height_mm
+                base_diameter = 2 * radius_mm + 2 * height_mm
+                suggested = base_diameter + dia_clr
                 message += (
                     '\n\n📌 配合螺母建议内径：\n'
                     f'  圆柱外径（{2 * radius_mm:.1f} mm）+ '
                     f'{2 * height_mm:.1f} mm（2 × H）+ 间隙\n'
-                    f'  = {mating_diameter:.1f} mm + 间隙')
+                    f'  = {base_diameter:.1f} mm + 间隙\n'
+                    f'  建议间隙（单侧）≈ {clr:.1f} mm → 内径 ≈ {suggested:.1f} mm\n'
+                    f'  （FDM 打印常用单侧间隙 0.2–0.4 mm，可按打印机精度调整）')
             else:
-                mating_diameter = 2 * radius_mm - 2 * height_mm
+                base_diameter = 2 * radius_mm - 2 * height_mm
+                suggested = base_diameter - dia_clr
                 message += (
                     '\n\n📌 配合螺杆建议外径：\n'
                     f'  圆孔内径（{2 * radius_mm:.1f} mm）- '
                     f'{2 * height_mm:.1f} mm（2 × H）- 间隙\n'
-                    f'  = {mating_diameter:.1f} mm - 间隙')
+                    f'  = {base_diameter:.1f} mm - 间隙\n'
+                    f'  建议间隙（单侧）≈ {clr:.1f} mm → 外径 ≈ {suggested:.1f} mm\n'
+                    f'  （FDM 打印常用单侧间隙 0.2–0.4 mm，可按打印机精度调整）')
             _ui.messageBox(message, '生成成功')
         except:
             _ui.messageBox(
