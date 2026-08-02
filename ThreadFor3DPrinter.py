@@ -35,21 +35,26 @@ def _profile_dimensions(L, H, angle_degrees):
     return flank_run, short_edge, max_height
 
 
-def _samples_per_turn_for_radius(radius_cm, requested, tooth_height_mm):
+def _samples_per_turn_for_radius(radius_cm, requested, tooth_height_mm,
+                                 deviation_ratio=None):
     """Return the effective samples-per-turn for a cylinder radius.
 
     A circle of radius R sampled at n points per turn has a maximum chord-to-arc
     (sagitta) deviation of R * (1 - cos(pi / n)). The sweep guides the profile
     along the cylinder face, so this deviation must stay within
-    HELIX_DEVIATION_TOLERANCE_RATIO * tooth_height_mm or the kernel rejects the
-    sweep. We raise the sample count until the sagitta is within tolerance. The
-    caller's requested value is honoured as a lower bound.
+    deviation_ratio * tooth_height_mm or the kernel rejects the sweep. We raise
+    the sample count until the sagitta is within tolerance. The caller's
+    requested value is honoured as a lower bound.
+
+    deviation_ratio defaults to HELIX_DEVIATION_TOLERANCE_RATIO when None.
     """
     radius_mm = radius_cm * 10.0
     base = max(MIN_SAMPLES_PER_TURN, int(requested))
     if radius_mm <= 0 or tooth_height_mm <= 0:
         return base
-    tol_mm = HELIX_DEVIATION_TOLERANCE_RATIO * tooth_height_mm
+    if deviation_ratio is None:
+        deviation_ratio = HELIX_DEVIATION_TOLERANCE_RATIO
+    tol_mm = deviation_ratio * tooth_height_mm
     # sagitta <= tol  =>  n >= pi / acos(1 - tol / R)
     ratio = tol_mm / radius_mm
     if ratio >= 1.0:
@@ -59,7 +64,8 @@ def _samples_per_turn_for_radius(radius_cm, requested, tooth_height_mm):
     return int(max(base, min(required, MAX_SAMPLES_PER_TURN)))
 
 
-def _plan_helix_sampling(radius_cm, requested_ppt, turns, tooth_height_mm):
+def _plan_helix_sampling(radius_cm, requested_ppt, turns, tooth_height_mm,
+                         deviation_ratio=None):
     """Plan effective sampling for a helix of the given radius and turn count.
 
     Returns a tuple (eff_ppt, turns, n_points, capped):
@@ -71,8 +77,11 @@ def _plan_helix_sampling(radius_cm, requested_ppt, turns, tooth_height_mm):
     The sampling density is never sacrificed to fit the budget. If the adaptive
     per-turn density would push the total beyond MAX_HELIX_POINTS, the turn
     count is reduced so every retained turn keeps full precision.
+
+    deviation_ratio defaults to HELIX_DEVIATION_TOLERANCE_RATIO when None.
     """
-    eff_ppt = _samples_per_turn_for_radius(radius_cm, requested_ppt, tooth_height_mm)
+    eff_ppt = _samples_per_turn_for_radius(
+        radius_cm, requested_ppt, tooth_height_mm, deviation_ratio)
     capped = False
     if turns > 0 and eff_ppt > 0 and turns * eff_ppt > MAX_HELIX_POINTS:
         turns = max(1, int(MAX_HELIX_POINTS // eff_ppt))
@@ -139,7 +148,8 @@ def _radial_dir(ax):
     return u
 
 
-def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0, tooth_height_mm=1.0):
+def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0,
+                 tooth_height_mm=1.0, deviation_ratio=None):
     """生成螺旋线点列。offset_cm: 螺旋线起点距圆柱底端的偏移"""
     # Generate helix point sequence. offset_cm: offset from cylinder bottom to helix start
     radius, height, h_min, ax, origin = _get_cyl_info(face)
@@ -151,7 +161,7 @@ def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0, tooth_height_mm=
     # turn count is reduced (not the sampling density) so the path always hugs
     # the cylinder surface.
     eff_ppt, N, n_pts, capped = _plan_helix_sampling(
-        radius, pts_per_turn, N, tooth_height_mm)
+        radius, pts_per_turn, N, tooth_height_mm, deviation_ratio)
     hh = N * P
     h_start = h_min + offset_cm       # 偏移后的起始高度
     # Adjusted starting height after offset
@@ -248,7 +258,8 @@ def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None,
 def generate_thread(face, tooth_width_mm, tooth_height_mm,
                     end_offset_mm=0.0, samples_per_turn=16,
                     join_to_target=False, feature_name='GeneratedThread',
-                    max_turns_per_sweep=4, flank_angle_degrees=45.0):
+                    max_turns_per_sweep=4, flank_angle_degrees=45.0,
+                    deviation_ratio=None):
     """Generate a printable trapezoidal thread without opening the GUI.
 
     Args:
@@ -261,6 +272,9 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         feature_name: Browser name for generated sketches/features.
         max_turns_per_sweep: Maximum turns in each sweep segment.
         flank_angle_degrees: Angle between either flank and the thread axis.
+        deviation_ratio: Helix deviation as a fraction of tooth height
+            (default HELIX_DEVIATION_TOLERANCE_RATIO = 0.5). Lower values
+            increase sampling density and surface smoothness.
 
     Returns:
         A JSON-serialisable dict describing the generated thread.
@@ -281,6 +295,11 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     pts_per_turn = max(4, int(samples_per_turn))
     segment_turn_limit = max(1, int(max_turns_per_sweep))
     angle_degrees = float(flank_angle_degrees)
+    if deviation_ratio is None:
+        deviation_ratio = HELIX_DEVIATION_TOLERANCE_RATIO
+    deviation_ratio = float(deviation_ratio)
+    if not (0.0 < deviation_ratio <= 1.0):
+        raise ValueError('deviation_ratio must be in (0, 1]')
     if L_cm <= 0 or H_cm <= 0:
         raise ValueError('tooth_width_mm and tooth_height_mm must be positive')
     if not MIN_FLANK_ANGLE_DEG <= angle_degrees <= MAX_FLANK_ANGLE_DEG:
@@ -312,7 +331,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
 
     pts, turns, helix_height, pitch, radius = _build_helix(
         face, L_cm, flank_run_cm, pts_per_turn, offset_cm,
-        tooth_height_mm=H_cm * 10.0)
+        tooth_height_mm=H_cm * 10.0, deviation_ratio=deviation_ratio)
     if turns < 1 or helix_height <= 0:
         raise ValueError('Selected cylinder is too short for the requested thread and offset')
 
@@ -456,6 +475,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         'thread_length_mm': helix_height * 10.0,
         'end_offset_mm': offset_cm * 10.0,
         'samples_per_turn': pts_per_turn,
+        'deviation_ratio': deviation_ratio,
         'segment_count': segment_count,
         'max_turns_per_sweep': segment_turn_limit,
         'cylinder_radius_mm': radius * 10.0,
@@ -506,6 +526,7 @@ def generate_thread_from_json(payload):
         feature_name=payload.get('feature_name', 'GeneratedThread'),
         max_turns_per_sweep=payload.get('max_turns_per_sweep', 4),
         flank_angle_degrees=payload.get('flank_angle_degrees', 45.0),
+        deviation_ratio=payload.get('deviation_ratio', None),
     )
 
 
@@ -549,6 +570,31 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs.addValueInput('offset', '端面偏移', 'mm',
                 adsk.core.ValueInput.createByString('0 mm'))
 
+            join_inp = inputs.addBoolValueInput(
+                'join_target', '合并到圆柱体', True, '', False)
+            join_inp.tooltip = '将生成的螺纹与所选圆柱体合并为一个实体'
+            join_inp.tooltipDescription = (
+                '勾选后，螺纹体会通过布尔合并与所选圆柱体合并为单一实体。<br/><br/>'
+                '取消勾选则螺纹与圆柱体保持为两个独立实体（仅贴合）。<br/><br/>'
+                '合并可消除放大时两实体之间的接缝。')
+
+            inputs.addBoolValueInput(
+                'show_advanced', '显示高级选项', False, '', False)
+
+            ratio_inp = inputs.addValueInput(
+                'dev_ratio', '路径偏差系数', '',
+                adsk.core.ValueInput.createByReal(
+                    HELIX_DEVIATION_TOLERANCE_RATIO))
+            ratio_inp.isVisible = False
+            ratio_inp.tooltip = '路径偏差占牙高的比例（0.1–1.0）'
+            ratio_inp.tooltipDescription = (
+                '控制螺旋拟合样条偏离圆柱面的允许偏差，'
+                '以牙高 H 的比例表示。<br/><br/>'
+                '允许偏差 = 系数 × H。系数越小，每圈采样点越多，'
+                '牙侧面越光滑，但生成越慢。<br/><br/>'
+                '默认 0.5（允许偏差 = 牙高的一半），推荐范围 0.2–0.5。'
+                '过小会显著增加生成时间，过大可能导致扫掠失败。')
+
             inputs.addTextBoxCommandInput('calc_info', '自动计算',
                 '<i>选择面后自动计算...</i>', 6, True)
 
@@ -582,6 +628,10 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 all_ins.itemById('flank_angle'))
             ppt_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('ppt'))
             off_inp  = adsk.core.ValueCommandInput.cast(all_ins.itemById('offset'))
+            adv_inp  = adsk.core.BoolValueCommandInput.cast(
+                all_ins.itemById('show_advanced'))
+            ratio_inp = adsk.core.ValueCommandInput.cast(
+                all_ins.itemById('dev_ratio'))
             calc_box = adsk.core.TextBoxCommandInput.cast(all_ins.itemById('calc_info'))
             profile_box = adsk.core.TextBoxCommandInput.cast(
                 all_ins.itemById('profile_status'))
@@ -634,6 +684,15 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
             ppt      = max(4, int(ppt_inp.value))
             offset   = off_inp.value
 
+            # Toggle the advanced ratio input visibility
+            ratio_inp.isVisible = bool(adv_inp.value)
+            # Clamp the ratio to a sane range; use the default when invalid
+            ratio_val = float(ratio_inp.value)
+            if not (0.0 < ratio_val <= 1.0):
+                ratio_val = HELIX_DEVIATION_TOLERANCE_RATIO
+                if adv_inp.value:
+                    ratio_inp.value = ratio_val
+
             S = max(0.0, raw_S)
             P = L_val + S
             lines = []
@@ -669,7 +728,7 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 if N * P > height - offset and N > 1:
                     N -= 1
                 eff_ppt, N, n_pts, capped = _plan_helix_sampling(
-                    radius, ppt, N, H_val * 10.0)
+                    radius, ppt, N, H_val * 10.0, ratio_val)
                 act_h = N * P
                 n_total = n_pts + 1 if N > 0 else 0
                 # 螺旋路径总长度（考虑螺距）
@@ -687,6 +746,10 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
                 lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
                 lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}（每圈 {eff_ppt} 点）')
+                if adv_inp.value:
+                    lines.append(
+                        f'<b>路径偏差系数:</b> {ratio_val:.2f} '
+                        f'（允许偏差 ≤ {ratio_val * H_val * 10:.3f} mm）')
                 if capped:
                     lines.append('<font color="orange">⚠ 圈数已达样条点数预算上限，为保证路径贴合圆柱已自动减少圈数；如需更多圈数请增大端面偏移以外的可用长度或降低每圈采样</font>')
                 if not is_ext and H_val >= radius:
@@ -756,6 +819,14 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 inputs.itemById('flank_angle'))
             samples = adsk.core.ValueCommandInput.cast(
                 inputs.itemById('ppt'))
+            ratio_inp = adsk.core.ValueCommandInput.cast(
+                inputs.itemById('dev_ratio'))
+            join_inp = adsk.core.BoolValueCommandInput.cast(
+                inputs.itemById('join_target'))
+
+            ratio_val = float(ratio_inp.value)
+            if not (0.0 < ratio_val <= 1.0):
+                ratio_val = HELIX_DEVIATION_TOLERANCE_RATIO
 
             result = generate_thread(
                 face=adsk.fusion.BRepFace.cast(
@@ -764,9 +835,10 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 tooth_height_mm=tooth_height.value * 10.0,
                 end_offset_mm=inputs.itemById('offset').value * 10.0,
                 samples_per_turn=max(4, int(samples.value)),
-                join_to_target=False,
+                join_to_target=bool(join_inp.value),
                 feature_name='GeneratedThread',
                 flank_angle_degrees=math.degrees(flank_angle.value),
+                deviation_ratio=ratio_val,
             )
 
             thread_label = (
@@ -782,7 +854,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f"【螺旋】P={result['pitch_mm']:.2f} mm  "
                 f"转数={result['turns']}  "
                 f"高度={result['thread_length_mm']:.2f} mm\n"
-                '【结果】实体=1'
+                f"【结果】{'已合并到圆柱体（实体=1）' if result['joined_to_target'] else '独立螺纹体（实体=2：螺纹+圆柱）'}"
             )
             radius_mm = result['cylinder_radius_mm']
             height_mm = result['tooth_height_mm']

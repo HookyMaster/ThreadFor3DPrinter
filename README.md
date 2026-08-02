@@ -94,6 +94,9 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **Flank angle α:** angle between either tooth flank and the thread axis. Adjustable from `5°` to `45°`.
    - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`. The add-in automatically raises this value for large diameters so the helix path stays within half the tooth height of the cylinder surface; the value you enter is used as a lower bound.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
+   - **Join to cylinder:** when ticked (default), the thread body is boolean-joined with the selected cylinder into a single body; untick to keep the thread and cylinder as two separate bodies. Joining removes the seam visible between two bodies when zoomed in.
+   - **Show advanced options:** tick to reveal the "Deviation ratio" input.
+   - **Deviation ratio** (advanced): controls the allowed deviation of the fitted helix spline from the cylinder surface, expressed as a fraction of the tooth height H (allowed deviation = ratio × H). Default: `0.5` (deviation within half the tooth height); recommended range `0.2–0.5`. A smaller ratio uses more samples per turn for smoother tooth flanks but is slower to generate; too large a value may cause a sweep failure. Hover the mouse over the input for a detailed description.
 5. Review the automatically calculated **tooth crest width S (crest flat)**, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type. The profile-status area directly below the H and angle inputs reports any automatic correction.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
 
@@ -152,6 +155,7 @@ result = thread_tool.generate_thread(
     feature_name='Lid_Internal_Thread',
     max_turns_per_sweep=4,
     flank_angle_degrees=30,
+    deviation_ratio=0.5,
 )
 print(result)
 ```
@@ -169,6 +173,7 @@ payload = {
     'feature_name': 'Lid_Internal_Thread',
     'max_turns_per_sweep': 4,
     'flank_angle_degrees': 30,
+    'deviation_ratio': 0.5,
 }
 
 result = thread_tool.generate_thread_from_json(payload)
@@ -204,6 +209,14 @@ string. Its result is a JSON-serializable dictionary containing:
 - `max_turns_per_sweep` defaults to `4`. Long threads are swept in multiple
   sections to avoid Fusion kernel failures. The linked pitch formula remains
   unchanged.
+- `deviation_ratio` defaults to `0.5` (i.e. `HELIX_DEVIATION_TOLERANCE_RATIO`)
+  and must be in `(0, 1]`. It is the maximum allowed deviation of the fitted
+  helix spline from the cylinder surface as a fraction of the tooth height H
+  (allowed deviation = `deviation_ratio * tooth_height_mm`). Lower values use
+  more samples per turn for smoother tooth flanks but generate more slowly;
+  values that are too large may cause `ASM_SWEEP_ILLEGAL_SURFACE`. Recommended
+  range: `0.2–0.5`. The returned dict reports the effective value in the
+  `deviation_ratio` field.
 - One generation call creates one helix sketch, one profile plane, and one
   profile sketch. Later sweep sections continue from the previous section's
   end face while retaining the cylindrical guide surface.
