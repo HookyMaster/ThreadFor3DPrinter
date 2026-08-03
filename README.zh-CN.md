@@ -23,9 +23,9 @@
 
 ## 效果展示
 
-| 外螺纹 | 内螺纹 |
-| --- | --- |
-| ![Fusion 360 外螺纹生成器完成适合 3D 打印的梯形螺杆螺纹](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 内螺纹生成器完成螺母圆孔螺纹](docs/images/fusion-360-internal-thread-generator.png) |
+| 外螺纹 | 内螺纹 | 旋盖罐示例 |
+| --- | --- | --- |
+| ![Fusion 360 外螺纹生成器完成适合 3D 打印的梯形螺杆螺纹](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 内螺纹生成器完成螺母圆孔螺纹](docs/images/fusion-360-internal-thread-generator.png) | ![Fusion 360 中带配套螺纹盖的旋盖罐模型](docs/images/Screw-Top%20Jar.png) |
 
 ### 内外螺纹配合剖面
 

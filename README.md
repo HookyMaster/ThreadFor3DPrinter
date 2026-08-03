@@ -23,9 +23,9 @@
 
 ## Screenshots
 
-| External thread | Internal thread |
-| --- | --- |
-| ![Fusion 360 external thread generator showing a completed trapezoidal bolt thread](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 internal thread generator showing a completed threaded hole](docs/images/fusion-360-internal-thread-generator.png) |
+| External thread | Internal thread | Screw-top jar example |
+| --- | --- | --- |
+| ![Fusion 360 external thread generator showing a completed trapezoidal bolt thread](docs/images/fusion-360-external-thread-generator.png) | ![Fusion 360 internal thread generator showing a completed threaded hole](docs/images/fusion-360-internal-thread-generator.png) | ![Screw-top jar model with matching threaded lid generated in Fusion 360](docs/images/Screw-Top%20Jar.png) |
 
 ### Internal and external thread section view
 
