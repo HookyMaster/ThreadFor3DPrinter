@@ -195,10 +195,19 @@ def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0,
 
 
 def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
-                      start_pt, is_external):
+                      start_pt, is_external, center_on_anchor=False,
+                      anchor_offset_cm=0.0):
     """在路径垂面上画梯形截面。
     is_external=True  → 向外长肉（外螺纹）
     is_external=False → 向内长肉（内螺纹）
+
+    start_pt 是锚点（螺旋线上的采样点）。
+    - 扫掠（center_on_anchor=False, anchor_offset_cm=0）：长边起点 =
+      start_pt，梯形沿轴向延伸 L——螺纹从路径起点开始，不超出端面。
+    - 放样（center_on_anchor=True）：锚点先沿轴向平移 anchor_offset_cm
+      （通常 = L/2），梯形长边中点落在平移后的锚点上，于是长边起点回到
+      原始螺旋线采样点——每个放样截面的长边起点都穿过同一条螺旋线，
+      与扫掠梯形几何一致，放样体才不会歪。
     """
     # Draw trapezoid cross-section on the plane perpendicular to the path
     _, _, h_min, ax, origin = _get_cyl_info(face)
@@ -222,11 +231,33 @@ def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
     flank_run, short_len, _ = _profile_dimensions(
         L, H, angle_degrees)
 
-    # 梯形四点（世界坐标）
-    # Four trapezoid points (world coordinates)
-    B_world = start_pt
-    A_world = adsk.core.Point3D.create(
-        B_world.x + L * ax.x, B_world.y + L * ax.y, B_world.z + L * ax.z)
+    # 放样模式：锚点先沿轴向平移，再让长边中点落在锚点上
+    # Loft mode: shift the anchor axially first, then centre the long edge
+    # on the shifted anchor so its START lands back on the helix sample.
+    if anchor_offset_cm:
+        start_pt = adsk.core.Point3D.create(
+            start_pt.x + anchor_offset_cm * ax.x,
+            start_pt.y + anchor_offset_cm * ax.y,
+            start_pt.z + anchor_offset_cm * ax.z)
+
+    if center_on_anchor:
+        half = 0.5 * L
+        B_world = adsk.core.Point3D.create(
+            start_pt.x - half * ax.x,
+            start_pt.y - half * ax.y,
+            start_pt.z - half * ax.z)
+        A_world = adsk.core.Point3D.create(
+            start_pt.x + half * ax.x,
+            start_pt.y + half * ax.y,
+            start_pt.z + half * ax.z)
+    else:
+        # 扫掠模式：长边起点 = 锚点（原方法，螺纹不偏移）
+        # Sweep mode: long-edge START is the anchor (original behaviour)
+        B_world = start_pt
+        A_world = adsk.core.Point3D.create(
+            start_pt.x + L * ax.x,
+            start_pt.y + L * ax.y,
+            start_pt.z + L * ax.z)
     P_bot_world = adsk.core.Point3D.create(
         B_world.x + sign * H * rad_vec.x + flank_run * ax.x,
         B_world.y + sign * H * rad_vec.y + flank_run * ax.y,
@@ -420,6 +451,27 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     junction_pt = None
     exit_junction_pt = None
     lead_pts = None
+    # The loft ramps ride a helix that is SHIFTED by L/2 along the axis
+    # relative to the sweep helix. Rationale: the sweep trapezoid starts its
+    # long edge ON the sweep helix, so the long-edge MIDPOINT of a sweep
+    # section sits at helix + L/2. We shift the loft helix by the same L/2
+    # and centre each loft trapezoid's long edge on the shifted helix, so the
+    # loft long-edge START lands back on the sweep helix and both ends match.
+    # The shift uses the FULL tooth width L/2 (not scaled per section).
+    _, _, _, ax_shift, _ = _get_cyl_info(face)
+    ramp_shift_cm = 0.5 * L_cm
+
+    def _shift_points(obj, shift_cm):
+        """沿轴向平移一组世界坐标点，返回新 ObjectCollection。"""
+        shifted = adsk.core.ObjectCollection.create()
+        for i in range(obj.count):
+            pt = obj.item(i)
+            shifted.add(adsk.core.Point3D.create(
+                pt.x + shift_cm * ax_shift.x,
+                pt.y + shift_cm * ax_shift.y,
+                pt.z + shift_cm * ax_shift.z))
+        return shifted
+
     if use_lead_in:
         # Fit one spline through a densely sampled copy of the ramp arc.
         # The main helix point list only contributes ~2 points over 1/8 turn,
@@ -428,14 +480,20 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         lead_pts_world = _ramp_helix_points(
             face, L_cm, flank_run_cm, lead_in_turns, LEAD_IN_MIN_POINTS,
             offset_cm, turns)
+        lead_pts_shift_world = _shift_points(lead_pts_world, ramp_shift_cm)
         if occurrence:
             lead_pts = adsk.core.ObjectCollection.create()
+            lead_shifted = adsk.core.ObjectCollection.create()
             for i in range(lead_pts_world.count):
                 pt = lead_pts_world.item(i).copy()
                 pt.transformBy(inv)
                 lead_pts.add(pt)
+                sp = lead_pts_shift_world.item(i).copy()
+                sp.transformBy(inv)
+                lead_shifted.add(sp)
         else:
             lead_pts = lead_pts_world
+            lead_shifted = lead_pts_shift_world
         junction_pt = lead_pts.item(lead_pts.count - 1)
     if use_lead_out:
         # Exit ramp: samples run from the junction (full size) towards the
@@ -444,14 +502,20 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         exit_pts_world = _ramp_helix_points(
             face, L_cm, flank_run_cm, lead_out_turns, LEAD_IN_MIN_POINTS,
             offset_cm, turns, from_end=True)
+        exit_pts_shift_world = _shift_points(exit_pts_world, ramp_shift_cm)
         if occurrence:
             exit_pts = adsk.core.ObjectCollection.create()
+            exit_shifted = adsk.core.ObjectCollection.create()
             for i in range(exit_pts_world.count):
                 pt = exit_pts_world.item(i).copy()
                 pt.transformBy(inv)
                 exit_pts.add(pt)
+                sp = exit_pts_shift_world.item(i).copy()
+                sp.transformBy(inv)
+                exit_shifted.add(sp)
         else:
             exit_pts = exit_pts_world
+            exit_shifted = exit_pts_shift_world
         exit_junction_pt = exit_pts.item(0)
 
     # ── Main sweep path: the first segment starts at the exact junction point
@@ -554,7 +618,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         sketch_lead.name = safe_name + '_LeadIn_Helix'
         sketch_lead.isComputeDeferred = True
         lead_spline = sketch_lead.sketchCurves.sketchFittedSplines.add(
-            lead_pts)
+            lead_shifted)
         sketch_lead.isComputeDeferred = False
 
         # Entrance scale, raised if needed so the tiny section keeps a
@@ -567,21 +631,20 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         for k in range(LEAD_IN_SECTIONS):
             frac = k / float(LEAD_IN_SECTIONS - 1)
             scale = entrance_scale + (1.0 - entrance_scale) * frac
-            if k < LEAD_IN_SECTIONS - 1:
-                plane_input_k = comp.constructionPlanes.createInput()
-                plane_input_k.setByDistanceOnPath(
-                    lead_spline, adsk.core.ValueInput.createByReal(frac))
-                section_plane = comp.constructionPlanes.add(plane_input_k)
-                section_plane.name = safe_name + '_LeadIn_Plane_' + str(k)
-                anchor = lead_pts.item(int(round(frac * LEAD_IN_MIN_POINTS)))
-            else:
-                # Last section: identical plane and anchor to the main sweep
-                # start so the seam is exact.
-                section_plane = perp_plane
-                anchor = junction_pt
+            plane_input_k = comp.constructionPlanes.createInput()
+            plane_input_k.setByDistanceOnPath(
+                lead_spline, adsk.core.ValueInput.createByReal(frac))
+            section_plane = comp.constructionPlanes.add(plane_input_k)
+            section_plane.name = safe_name + '_LeadIn_Plane_' + str(k)
+            # Anchors come from the SHIFTED helix (original helix + L/2);
+            # centring the long edge on them puts the long-edge START back on
+            # the original (sweep) helix, matching the sweep profile exactly.
+            anchor = lead_shifted.item(
+                int(round(frac * LEAD_IN_MIN_POINTS)))
             section_sketch, _ = _create_trapezoid(
                 comp, section_plane, face, L_cm * scale, H_cm * scale,
-                angle_degrees, anchor, is_external)
+                angle_degrees, anchor, is_external,
+                center_on_anchor=True)
             section_sketch.name = safe_name + '_LeadIn_Section_' + str(k)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
@@ -675,7 +738,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         sketch_exit.name = safe_name + '_LeadOut_Helix'
         sketch_exit.isComputeDeferred = True
         exit_spline = sketch_exit.sketchCurves.sketchFittedSplines.add(
-            exit_pts)
+            exit_shifted)
         sketch_exit.isComputeDeferred = False
 
         exit_scale = LEAD_IN_START_SCALE
@@ -693,10 +756,15 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 exit_spline, adsk.core.ValueInput.createByReal(frac))
             section_plane = comp.constructionPlanes.add(plane_input_k)
             section_plane.name = safe_name + '_LeadOut_Plane_' + str(k)
-            anchor = exit_pts.item(int(round(frac * LEAD_IN_MIN_POINTS)))
+            # Anchors come from the SHIFTED helix (original helix + L/2);
+            # centring the long edge on them puts the long-edge START back on
+            # the original (sweep) helix, matching the sweep profile exactly.
+            anchor = exit_shifted.item(
+                int(round(frac * LEAD_IN_MIN_POINTS)))
             section_sketch, _ = _create_trapezoid(
                 comp, section_plane, face, L_cm * scale, H_cm * scale,
-                angle_degrees, anchor, is_external)
+                angle_degrees, anchor, is_external,
+                center_on_anchor=True)
             section_sketch.name = safe_name + '_LeadOut_Section_' + str(k)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
