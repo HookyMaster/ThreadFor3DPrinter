@@ -18,9 +18,13 @@ RECOMMENDED_CLEARANCE_MM = 0.3
 # cylinder surface, expressed as a fraction of the tooth height H.  The sweep
 # guides the profile along the cylinder face; if the path strays further than
 # roughly H from the surface the profile can no longer follow the guide and
-# the kernel rejects the sweep (ASM_SWEEP_ILLEGAL_SURFACE).  0.5 gives a
-# comfortable safety margin while keeping point counts low.
-HELIX_DEVIATION_TOLERANCE_RATIO = 0.5
+# the kernel rejects the sweep (ASM_SWEEP_ILLEGAL_SURFACE).  0.5 used to be
+# the default, but MCP-verified tests on a CLEAN full cylinder face offset
+# from the origin (e.g. a jar body at x=12.5 cm) showed the exit-ramp sweep
+# failing with ASM_SWEEP_ILLEGAL_SURFACE at 36 pts/turn while succeeding at
+# ~51 pts/turn (ratio 0.25).  Tighter ratio = denser sampling = smoother
+# spline that hugs the guide face.  Keep 0.25 as the default.
+HELIX_DEVIATION_TOLERANCE_RATIO = 0.25
 MIN_SAMPLES_PER_TURN = 16
 MAX_SAMPLES_PER_TURN = 360
 # Hard cap on the total number of spline points for one helix. When the
@@ -38,6 +42,17 @@ LEAD_OUT_TURNS = 0.125         # exit ramp length: 1/8 of a turn
 LEAD_IN_START_SCALE = 0.10     # section scale at the very tip (10%)
 LEAD_IN_SECTIONS = 5           # loft sections across each ramp
 LEAD_IN_MIN_POINTS = 12        # minimum spline points for a ramp arc
+# The loft ramp's last full-size section is placed slightly PAST the sweep
+# junction (into the main body), so the loft body overlaps the sweep body
+# with real volume instead of sharing a coincident face. A pure face-to-face
+# join (surfaces exactly coplanar) makes the boolean fail with
+# ASM_INCONS_FACE on large diameters (flatter helix, harder to distinguish
+# the coincident faces). 0.03 turns of overlap disappears into the main
+# thread visually and does not change the thread dimensions (union keeps
+# the outer surface, the overlapping full-size section is fully contained).
+LEAD_OVERLAP_TURNS = 0.03
+THREAD_ROOT_EMBED_CM = 0.002   # 0.02 mm: loft root sinks below the cylinder
+                               # face so the union has real volume overlap
 
 
 def _profile_dimensions(L, H, angle_degrees):
@@ -196,7 +211,7 @@ def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0,
 
 def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
                       start_pt, is_external, center_on_anchor=False,
-                      anchor_offset_cm=0.0):
+                      anchor_offset_cm=0.0, root_embed_cm=0.0):
     """在路径垂面上画梯形截面。
     is_external=True  → 向外长肉（外螺纹）
     is_external=False → 向内长肉（内螺纹）
@@ -208,6 +223,12 @@ def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
       （通常 = L/2），梯形长边中点落在平移后的锚点上，于是长边起点回到
       原始螺旋线采样点——每个放样截面的长边起点都穿过同一条螺旋线，
       与扫掠梯形几何一致，放样体才不会歪。
+
+    root_embed_cm > 0 时（仅放样）：牙根（长边）沿径向向圆柱实体内部
+    沉入该距离，牙顶（短边）位置不动。外螺纹向轴心、内螺纹向孔壁外侧。
+    放样体的牙根面若精确贴合圆柱面（零体积接触），布尔求并会失败
+    （ASM_INCONS_REL / ASM_EDGECOIN_PROBLEM）；沉入后两体有真实体积
+    重叠，求并成功，且螺纹外径 r+H 不变（牙顶未动）。
     """
     # Draw trapezoid cross-section on the plane perpendicular to the path
     _, _, h_min, ax, origin = _get_cyl_info(face)
@@ -266,6 +287,22 @@ def _create_trapezoid(root, perp_plane, face, L, H, angle_degrees,
         A_world.x + sign * H * rad_vec.x - flank_run * ax.x,
         A_world.y + sign * H * rad_vec.y - flank_run * ax.y,
         A_world.z + sign * H * rad_vec.z - flank_run * ax.z)
+
+    # Loft root embed: sink the long edge (root) radially INTO the target
+    # solid (towards -sign*rad). The tooth top P_bot/P_top keeps its r+H
+    # position, so the outer thread diameter is unchanged. Without this the
+    # loft root face lies exactly on the cylinder face (zero-volume contact)
+    # and the boolean union fails with ASM_INCONS_REL / ASM_EDGECOIN_PROBLEM
+    # even though a pure sweep body is tolerated.
+    if root_embed_cm:
+        B_world = adsk.core.Point3D.create(
+            B_world.x - sign * root_embed_cm * rad_vec.x,
+            B_world.y - sign * root_embed_cm * rad_vec.y,
+            B_world.z - sign * root_embed_cm * rad_vec.z)
+        A_world = adsk.core.Point3D.create(
+            A_world.x - sign * root_embed_cm * rad_vec.x,
+            A_world.y - sign * root_embed_cm * rad_vec.y,
+            A_world.z - sign * root_embed_cm * rad_vec.z)
 
     sketch = root.sketches.add(perp_plane)
     sketch.name = 'ThreadProfile'
@@ -355,7 +392,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         max_turns_per_sweep: Maximum turns in each sweep segment.
         flank_angle_degrees: Angle between either flank and the thread axis.
         deviation_ratio: Helix deviation as a fraction of tooth height
-            (default HELIX_DEVIATION_TOLERANCE_RATIO = 0.5). Lower values
+            (default HELIX_DEVIATION_TOLERANCE_RATIO = 0.25). Lower values
             increase sampling density and surface smoothness.
 
     Note:
@@ -448,8 +485,6 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     use_lead_out = lead_out_turns > 1e-6
     lead_body = None
     lead_out_body = None
-    junction_pt = None
-    exit_junction_pt = None
     lead_pts = None
     # The loft ramps ride a helix that is SHIFTED by L/2 along the axis
     # relative to the sweep helix. Rationale: the sweep trapezoid starts its
@@ -476,9 +511,13 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # Fit one spline through a densely sampled copy of the ramp arc.
         # The main helix point list only contributes ~2 points over 1/8 turn,
         # which would degenerate into a straight line; sample it independently.
-        # The final sample point is the EXACT junction with the main sweep.
+        # The sample arc is extended by LEAD_OVERLAP_TURNS past the sweep
+        # junction so the loft's last (full-size) section lands INSIDE the
+        # main body: the two bodies then overlap with volume and the boolean
+        # join succeeds (a face-to-face seam would fail with ASM_INCONS_FACE).
         lead_pts_world = _ramp_helix_points(
-            face, L_cm, flank_run_cm, lead_in_turns, LEAD_IN_MIN_POINTS,
+            face, L_cm, flank_run_cm,
+            lead_in_turns + LEAD_OVERLAP_TURNS, LEAD_IN_MIN_POINTS,
             offset_cm, turns)
         lead_pts_shift_world = _shift_points(lead_pts_world, ramp_shift_cm)
         if occurrence:
@@ -494,13 +533,19 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         else:
             lead_pts = lead_pts_world
             lead_shifted = lead_pts_shift_world
-        junction_pt = lead_pts.item(lead_pts.count - 1)
+        # The junction is where the ramp reaches full size (lead_in_turns),
+        # NOT the last sample: the sample arc extends LEAD_OVERLAP_TURNS
+        # beyond it so the loft can overlap the main body.
+        junc_frac = lead_in_turns / (lead_in_turns + LEAD_OVERLAP_TURNS)
     if use_lead_out:
-        # Exit ramp: samples run from the junction (full size) towards the
-        # helix end. The first sample point is the EXACT junction with the
-        # main sweep.
+        # Exit ramp: samples run from BEFORE the junction (overlapping the
+        # main sweep body) towards the helix end. The first sample sits
+        # LEAD_OVERLAP_TURNS before the junction so the loft's first full-size
+        # section lands INSIDE the main body and the boolean join has volume
+        # overlap (a face-to-face seam would fail with ASM_INCONS_FACE).
         exit_pts_world = _ramp_helix_points(
-            face, L_cm, flank_run_cm, lead_out_turns, LEAD_IN_MIN_POINTS,
+            face, L_cm, flank_run_cm,
+            lead_out_turns + LEAD_OVERLAP_TURNS, LEAD_IN_MIN_POINTS,
             offset_cm, turns, from_end=True)
         exit_pts_shift_world = _shift_points(exit_pts_world, ramp_shift_cm)
         if occurrence:
@@ -516,11 +561,15 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         else:
             exit_pts = exit_pts_world
             exit_shifted = exit_pts_shift_world
-        exit_junction_pt = exit_pts.item(0)
 
-    # ── Main sweep path: the first segment starts at the exact junction point
-    # (not the nearest coarse sample), so the sweep start is aligned with the
-    # loft end. Same for the last segment and the exit junction. ──
+    # ── Main sweep path: every segment is built from the NATIVE helix sample
+    # points only (no ramp/junction point is inserted into any spline). The
+    # lead-in loft ends at the first segment's start sample and the lead-out
+    # loft starts inside the last segment's overlap region, so the sweep
+    # splines stay as smooth as the no-ramp case and the guided sweep never
+    # rejects them (an inserted ramp point near the spline end degrades the
+    # fit and triggers ASM_SWEEP_ILLEGAL_SURFACE on clean full cylinder
+    # faces; verified via Fusion MCP on a 130 mm jar body). ──
     # Points are laid out uniformly across all turns, so map turn boundaries
     # to point indices proportionally. Indexing by the requested pts_per_turn
     # would be wrong once adaptive sampling raises the effective density.
@@ -552,14 +601,32 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
             cleaned.append(t)
     boundaries = cleaned
     segment_count = len(boundaries) - 1
+    # First main-sweep segment starts at the first native sample at/after the
+    # main start turn. Computed here so the lead-in loft's final full-size
+    # section and the main profile can share this exact point.
+    main_start_index = int(math.ceil(
+        main_start_turn / turns * total_points)) if use_lead_in else 0
     sketch_helix = comp.sketches.add(comp.xYConstructionPlane)
     sketch_helix.name = safe_name + '_Helix'
     sketch_helix.isComputeDeferred = True
     segment_splines = []
     segment_start_pts = []
     for segment_index in range(segment_count):
-        first_turn = boundaries[segment_index]
-        last_turn = boundaries[segment_index + 1]
+        # Each segment's path OVERLAPS its neighbours by LEAD_OVERLAP_TURNS on
+        # the shared boundary: segment i-1 ends past the boundary and segment
+        # i starts before it, so the two swept bodies have real volume overlap
+        # and the boolean join succeeds. A seam where the two end faces are
+        # exactly coplanar fails with ASM_INCONS_FACE on large diameters. The
+        # first segment's start (lead-in junction) and the last segment's end
+        # (lead-out junction) stay exact.
+        if segment_index == 0:
+            first_turn = boundaries[segment_index]
+        else:
+            first_turn = boundaries[segment_index] - LEAD_OVERLAP_TURNS
+        if segment_index == segment_count - 1:
+            last_turn = boundaries[segment_index + 1]
+        else:
+            last_turn = boundaries[segment_index + 1] + LEAD_OVERLAP_TURNS
         # floor: the last coarse sample must never land past a non-integer
         # turn boundary. With round() the last sample of the exit ramp can sit
         # AFTER the exit junction (e.g. 3.9 turns vs the 3.875 junction),
@@ -568,17 +635,12 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         last_point = min(total_points,
                          int(math.floor(last_turn / turns * total_points)))
         segment_points = adsk.core.ObjectCollection.create()
-        if segment_index == 0 and use_lead_in:
-            segment_points.add(junction_pt)
-            start_index = int(math.ceil(
-                main_start_turn / turns * total_points))
-            # Skip the first coarse sample if it coincides with the junction
-            # (happens when the junction lands exactly on a sample point);
-            # duplicate points would break the spline fit.
-            if start_index <= last_point:
-                candidate = pts.item(start_index)
-                if candidate.distanceTo(junction_pt) < 1e-6:
-                    start_index += 1
+        if segment_index == 0:
+            # First segment starts at the first NATIVE sample at/after the
+            # main start turn (no ramp junction point is inserted into the
+            # spline). The lead-in loft body overlaps this start region, so
+            # the seam is a volume overlap, exactly like the no-ramp case.
+            start_index = main_start_index
         else:
             # Segment boundaries are non-integer turns (e.g. 4.125 with a
             # lead-in ramp); floor keeps this segment's first sample exactly
@@ -589,14 +651,6 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 first_turn / turns * total_points))
         for point_index in range(start_index, last_point + 1):
             segment_points.add(pts.item(point_index))
-        if segment_index == segment_count - 1 and use_lead_out:
-            # End at the exact exit junction point instead of the nearest
-            # coarse sample, mirroring the entrance handling.
-            if segment_points.count > 0:
-                candidate = segment_points.item(segment_points.count - 1)
-                if candidate.distanceTo(exit_junction_pt) < 1e-6:
-                    segment_points.removeByIndex(segment_points.count - 1)
-            segment_points.add(exit_junction_pt)
         segment_start_pts.append(segment_points.item(0))
         segment_splines.append(
             sketch_helix.sketchCurves.sketchFittedSplines.add(
@@ -627,10 +681,23 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         if entrance_scale * short_cm < MIN_SHORT_EDGE_CM:
             entrance_scale = min(1.0, MIN_SHORT_EDGE_CM / max(short_cm, 1e-9))
 
+        # The sample arc runs lead_in + LEAD_OVERLAP_TURNS; the trapezoid
+        # ramps from entrance_scale up to 1.0 over the lead_in part and the
+        # LAST section (full size) sits past the junction, inside the main
+        # sweep body, so the boolean join has real volume overlap instead of
+        # two coincident faces (ASM_INCONS_FACE).
+        junc_frac = lead_in_turns / (lead_in_turns + LEAD_OVERLAP_TURNS)
+        n_grad = LEAD_IN_SECTIONS - 1
         loft_profiles = []
         for k in range(LEAD_IN_SECTIONS):
-            frac = k / float(LEAD_IN_SECTIONS - 1)
-            scale = entrance_scale + (1.0 - entrance_scale) * frac
+            if k < n_grad:
+                frac = (k / float(n_grad - 1)) * junc_frac
+                scale = entrance_scale + (
+                    1.0 - entrance_scale) * (k / float(n_grad - 1))
+            else:
+                # Overlap section: full size, inside the main body.
+                frac = 1.0
+                scale = 1.0
             plane_input_k = comp.constructionPlanes.createInput()
             plane_input_k.setByDistanceOnPath(
                 lead_spline, adsk.core.ValueInput.createByReal(frac))
@@ -644,7 +711,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
             section_sketch, _ = _create_trapezoid(
                 comp, section_plane, face, L_cm * scale, H_cm * scale,
                 angle_degrees, anchor, is_external,
-                center_on_anchor=True)
+                center_on_anchor=True,
+                root_embed_cm=THREAD_ROOT_EMBED_CM)
             section_sketch.name = safe_name + '_LeadIn_Section_' + str(k)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
@@ -664,10 +732,11 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         lead_body = loft_feature.bodies.item(0)
         lead_body.name = safe_name + '_LeadIn_Body'
 
-    main_anchor = junction_pt if use_lead_in else pts.item(0)
+    main_anchor = pts.item(main_start_index)
     sketch_trap, short_cm = _create_trapezoid(
         comp, perp_plane, face, L_cm, H_cm, angle_degrees,
-        main_anchor, is_external)
+        main_anchor, is_external,
+        root_embed_cm=THREAD_ROOT_EMBED_CM)
     sketch_trap.name = safe_name + '_Profile'
     if sketch_trap.profiles.count == 0:
         raise RuntimeError('Thread profile did not form a closed region')
@@ -696,7 +765,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
             seg_plane.name = safe_name + '_SegPlane_' + str(segment_index)
             seg_sketch, _ = _create_trapezoid(
                 comp, seg_plane, face, L_cm, H_cm, angle_degrees,
-                segment_start_pts[segment_index], is_external)
+                segment_start_pts[segment_index], is_external,
+                root_embed_cm=THREAD_ROOT_EMBED_CM)
             seg_sketch.name = safe_name + '_SegProfile_' + str(segment_index)
             if seg_sketch.profiles.count == 0:
                 raise RuntimeError(
@@ -708,8 +778,20 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 sweep_profile.body
                 if adsk.fusion.BRepFace.cast(sweep_profile)
                 else None)
-        sweep_feature = _do_sweep(
-            comp, sweep_profile, spline, face, occurrence)
+        try:
+            sweep_feature = _do_sweep(
+                comp, sweep_profile, spline, face, occurrence)
+        except RuntimeError as e:
+            npts = 0
+            try:
+                npts = spline.fitPoints.count
+            except Exception:
+                pass
+            raise RuntimeError(
+                'Sweep failed at segment %d/%d (turns %.4f..%.4f, %d fit '
+                'points): %s' % (
+                    segment_index + 1, segment_count,
+                    first_turn, last_turn, npts, e))
         sweep_feature.name = segment_name + '_Sweep'
         new_bodies = []
         for body_index in range(sweep_feature.bodies.count):
@@ -728,11 +810,10 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # next segment already has its own aligned profile above.
 
     # ── Exit ramp (TESTING): mirrors the entrance ramp. The first loft
-    # section is a FULL-SIZE trapezoid at the sweep's end junction (drawn on
-    # a plane perpendicular to the exit path at its start), so the loft starts
-    # from the same trapezoid section that ends the main sweep; it then
-    # shrinks towards the helix end. All sections are sketch trapezoids, the
-    # same topology as the sweep profile, avoiding BRepFace-mixing issues. ──
+    # section is a FULL-SIZE trapezoid in the overlap arc BEFORE the sweep's
+    # end junction (i.e. inside the main body), so the boolean join has real
+    # volume overlap; the shrink then happens over the lead_out part and the
+    # last section reaches exit_scale at the helix end. ──
     if use_lead_out:
         sketch_exit = comp.sketches.add(comp.xYConstructionPlane)
         sketch_exit.name = safe_name + '_LeadOut_Helix'
@@ -745,12 +826,23 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         if exit_scale * short_cm < MIN_SHORT_EDGE_CM:
             exit_scale = min(1.0, MIN_SHORT_EDGE_CM / max(short_cm, 1e-9))
 
+        # k=0 (full size) sits in the overlap arc BEFORE the junction, i.e.
+        # inside the main sweep body; k=1 sits exactly at the junction, still
+        # full size; the remaining sections shrink down to exit_scale.
+        junc_frac_exit = LEAD_OVERLAP_TURNS / (
+            lead_out_turns + LEAD_OVERLAP_TURNS)
+        n_grad = LEAD_IN_SECTIONS - 1
         loft_profiles = []
         for k in range(LEAD_IN_SECTIONS):
-            frac = k / float(LEAD_IN_SECTIONS - 1)
-            # k=0 starts at FULL size (scale 1.0) at the sweep end junction,
-            # then shrinks linearly down to exit_scale at the helix end.
-            scale = 1.0 - (1.0 - exit_scale) * frac
+            if k == 0:
+                # Overlap section: full size, inside the main body.
+                frac = 0.0
+                scale = 1.0
+            else:
+                frac = junc_frac_exit + (
+                    (k - 1) / float(n_grad - 1)) * (1.0 - junc_frac_exit)
+                scale = 1.0 - (1.0 - exit_scale) * (
+                    (k - 1) / float(n_grad - 1))
             plane_input_k = comp.constructionPlanes.createInput()
             plane_input_k.setByDistanceOnPath(
                 exit_spline, adsk.core.ValueInput.createByReal(frac))
@@ -764,7 +856,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
             section_sketch, _ = _create_trapezoid(
                 comp, section_plane, face, L_cm * scale, H_cm * scale,
                 angle_degrees, anchor, is_external,
-                center_on_anchor=True)
+                center_on_anchor=True,
+                root_embed_cm=THREAD_ROOT_EMBED_CM)
             section_sketch.name = safe_name + '_LeadOut_Section_' + str(k)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
