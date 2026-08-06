@@ -32,6 +32,12 @@
 
 ![Fusion 360 section analysis showing the fit between internal and external 3D-printable threads](docs/images/internal-external-thread-section.png)
 
+### Lead-in / lead-out close-up
+
+![Fusion 360 close-up showing lead-in/lead-out ramps on a 3D-printable thread](docs/images/收口1.png)
+
+The first and last 1/8 turn of the thread ramps the trapezoid section (tooth height and tooth width together) from 10% up to full size, producing a tapered lead-in at both ends. A mating part can slide into the lead-in without hunting for the thread start, and both ends stay print-friendly — a vertical thin-wall tip would be too fragile for FDM. The checkbox in the dialog (default on) controls this behaviour; uncheck it for a full-height legacy thread.
+
 ## Files required for installation
 
 Keep these three files together in one folder:
