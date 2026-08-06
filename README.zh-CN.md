@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v2.0.0.zip)
+[English README](README.md) · [下载最新版本](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v3.0.0.zip)
 
 <img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
 
@@ -17,6 +17,7 @@
 - 自动识别内、外圆柱面。
 - 支持调整牙底宽度、牙高、牙侧角、采样精度和端面偏移。
 - 自动计算牙顶宽度，并保留最小 `0.2 mm` 牙顶平宽，避免截面自相交。
+- 可选**螺纹收口**：螺纹入口/出口各生成 1/8 圈渐变（牙高+牙宽 10%↔100%），便于螺母/螺杆对位旋入，且两端更易打印；可在对话框中关闭。
 - 显示估算的螺旋总长和样条线点数，并对高风险采样设置给出提示。
 - 生成完成后给出配合螺母或螺杆的建议直径及打印间隙。
 - 支持 Windows 和 macOS 上的 Autodesk Fusion。
@@ -92,11 +93,12 @@ ThreadFor3DPrinter/
    - **长边 L（牙底宽度）**：梯形牙型根部沿轴向的宽度，默认 `3 mm`。
    - **梯形高度 H（牙高）**：螺纹牙型的径向高度/深度，默认 `1 mm`。
    - **牙侧角 α**：牙侧面与螺纹轴线之间的夹角，可在 `5°–45°` 范围内调整。
-   - **每圈采样点数**：螺旋线的采样精度，默认 `16`，最小值为 `4`。对于大直径，工具会自动提高该值，使螺旋路径与圆柱面的偏差不超过牙高的一半；你输入的值作为下限使用。
+   - **每圈采样点数**：螺旋线的采样精度，默认 `16`，最小值为 `4`。对于大直径，工具会自动提高该值，使螺旋路径与圆柱面的偏差不超过牙高的四分之一；你输入的值作为下限使用。
    - **端面偏移**：从圆柱端面到螺旋线起点的距离，默认 `0 mm`。
+   - **螺纹收口**：勾选（默认）后，螺纹入口/出口各生成 1/8 圈渐变收口（牙高+牙宽 10%↔100%），便于螺母/螺杆对位旋入，且两端更易打印；取消勾选则生成完整牙高的普通螺纹（旧版行为）。
    - **合并到圆柱体**：勾选（默认）后，螺纹体会通过布尔合并与所选圆柱体合并为单一实体；取消勾选则螺纹与圆柱体保持为两个独立实体。合并可消除放大时两实体之间的接缝。
    - **显示高级选项**：勾选后显示“路径偏差系数”输入框。
-   - **路径偏差系数**（高级选项）：控制螺旋拟合样条偏离圆柱面的允许偏差，以牙高 H 的比例表示（允许偏差 = 系数 × H）。默认 `0.5`（即偏差不超过牙高的一半），推荐范围 `0.2–0.5`。系数越小，每圈采样点越多、牙侧面越光滑，但生成越慢；过大可能导致扫掠失败。鼠标悬浮在该输入框上可查看详细说明。
+   - **路径偏差系数**（高级选项）：控制螺旋拟合样条偏离圆柱面的允许偏差，以牙高 H 的比例表示（允许偏差 = 系数 × H）。默认 `0.25`（即偏差不超过牙高的四分之一），推荐范围 `0.1–0.5`。系数越小，每圈采样点越多、牙侧面越光滑，但生成越慢；过大可能导致扫掠失败。鼠标悬浮在该输入框上可查看详细说明。
 5. 检查工具自动计算的**牙顶宽度 S（牙顶平宽）**、螺距、圈数、螺旋高度和总长、样条线点数、圆柱尺寸及内外螺纹类型。H 和牙侧角下方的“截面状态”会直接显示自动修正提示。
 6. 点击 **确定**。工具会创建螺旋路径、梯形截面，并扫掠生成螺纹实体。
 
@@ -154,7 +156,8 @@ result = thread_tool.generate_thread(
     feature_name='Lid_Internal_Thread',
     max_turns_per_sweep=4,
     flank_angle_degrees=30,
-    deviation_ratio=0.5,
+    deviation_ratio=0.25,
+    enable_lead=True,
 )
 print(result)
 ```
@@ -172,7 +175,8 @@ payload = {
     'feature_name': 'Lid_Internal_Thread',
     'max_turns_per_sweep': 4,
     'flank_angle_degrees': 30,
-    'deviation_ratio': 0.5,
+    'deviation_ratio': 0.25,
+    'enable_lead': True,
 }
 
 result = thread_tool.generate_thread_from_json(payload)
@@ -199,20 +203,24 @@ result = thread_tool.generate_thread_from_json(payload)
 - 计算得到的牙顶宽度 `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` 必须至少为 `0.2 mm`。
 - `samples_per_turn` 的最小有效值为 `4`。该值作为下限使用：对于大半径
   圆柱，工具会自动提高每圈采样数，使拟合螺旋线与圆柱面的偏差不超过
-  牙高的一半，从而让扫掠始终贴合引导面，避免 `ASM_SWEEP_ILLEGAL_SURFACE`。
+  牙高的四分之一，从而让扫掠始终贴合引导面，避免 `ASM_SWEEP_ILLEGAL_SURFACE`。
   每圈采样数的有效值上限为 `360`。若自适应后的每圈密度会使总采样点数
   超过 `20000`，工具会减少圈数而非降低采样密度，以保证保留的每一圈都有
   完整精度。
 - `max_turns_per_sweep` 默认为 `4`。长螺纹采用分段扫掠，以避免
   Fusion 几何内核在长路径上失败；螺距联动公式保持不变。
-- `deviation_ratio` 默认值为 `0.5`（即 `HELIX_DEVIATION_TOLERANCE_RATIO`），
+- `deviation_ratio` 默认值为 `0.25`（即 `HELIX_DEVIATION_TOLERANCE_RATIO`），
   取值范围为 `(0, 1]`。它表示螺旋拟合样条允许偏离圆柱面的最大距离占牙高
   H 的比例（允许偏差 = `deviation_ratio × tooth_height_mm`）。值越小，每圈
   采样点越多、牙侧面越光滑，但生成越慢；值过大可能导致
-  `ASM_SWEEP_ILLEGAL_SURFACE`。推荐范围 `0.2–0.5`。返回结果字典中的
+  `ASM_SWEEP_ILLEGAL_SURFACE`。推荐范围 `0.1–0.5`。返回结果字典中的
   `deviation_ratio` 字段为实际生效值。
+- `enable_lead` 默认为 `True`：在螺纹入口/出口各生成 1/8 圈渐变收口
+  （牙高+牙宽 10%↔100%），更易旋入且两端更易打印；设为 `False` 则生成
+  完整牙高的普通螺纹（旧版行为）。
 - 每次生成只创建一个螺旋草图、一个截面构造平面和一个截面草图。
-  后续扫掠段从上一段的末端面继续，并始终保留圆柱导向面。
+  后续扫掠段在各自路径起点独立绘制梯形截面，并始终保留圆柱导向面；
+  相邻段在接缝处有少量体积重叠，保证布尔合并稳定。
 - 每次成功生成产生的所有特征都会放入一个名为
   `<feature_name>_Generation` 的 Fusion 时间线组；当 Fusion 允许分组时才会
   创建。如果无法分组（例如对应的时间线区间内已存在分组），生成仍会成功，

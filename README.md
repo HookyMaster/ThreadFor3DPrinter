@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v2.0.0.zip)
+[中文说明](README.zh-CN.md) · [Download the latest release](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/latest/download/ThreadFor3DPrinter-v3.0.0.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -17,6 +17,7 @@
 - Automatically detects internal and external cylindrical faces.
 - Provides adjustable tooth-root width, tooth height, flank angle, sampling resolution, and end offset.
 - Automatically calculates the tooth crest width and preserves a minimum `0.2 mm` crest flat to prevent profile self-intersection.
+- Optional **thread lead-in/lead-out**: the first and last 1/8 turn of the thread ramp the section (tooth height + width) from 10% to full size, so mating parts slide in easily and both ends stay print-friendly; can be disabled in the dialog.
 - Shows the estimated helix length and spline-point count, with warnings for risky sampling settings.
 - Reports a suggested mating nut or bolt diameter after generation, including recommended print clearance.
 - Supports Autodesk Fusion on Windows and macOS.
@@ -92,11 +93,12 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **Long edge L (tooth-root width):** axial width at the root of the trapezoidal tooth profile. Default: `3 mm`.
    - **Trapezoid height H (tooth height):** radial height/depth of the thread tooth. Default: `1 mm`.
    - **Flank angle α:** angle between either tooth flank and the thread axis. Adjustable from `5°` to `45°`.
-   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`. The add-in automatically raises this value for large diameters so the helix path stays within half the tooth height of the cylinder surface; the value you enter is used as a lower bound.
+   - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`. The add-in automatically raises this value for large diameters so the helix path stays within a quarter of the tooth height of the cylinder surface; the value you enter is used as a lower bound.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
+   - **Thread lead-in/lead-out:** when ticked (default), the first and last 1/8 turn of the thread ramp the section (tooth height + width) from 10% to full size, making it easier to start the mating part and keeping both ends print-friendly; untick to generate a full-height legacy thread.
    - **Join to cylinder:** when ticked (default), the thread body is boolean-joined with the selected cylinder into a single body; untick to keep the thread and cylinder as two separate bodies. Joining removes the seam visible between two bodies when zoomed in.
    - **Show advanced options:** tick to reveal the "Deviation ratio" input.
-   - **Deviation ratio** (advanced): controls the allowed deviation of the fitted helix spline from the cylinder surface, expressed as a fraction of the tooth height H (allowed deviation = ratio × H). Default: `0.5` (deviation within half the tooth height); recommended range `0.2–0.5`. A smaller ratio uses more samples per turn for smoother tooth flanks but is slower to generate; too large a value may cause a sweep failure. Hover the mouse over the input for a detailed description.
+   - **Deviation ratio** (advanced): controls the allowed deviation of the fitted helix spline from the cylinder surface, expressed as a fraction of the tooth height H (allowed deviation = ratio × H). Default: `0.25` (deviation within a quarter of the tooth height); recommended range `0.1–0.5`. A smaller ratio uses more samples per turn for smoother tooth flanks but is slower to generate; too large a value may cause a sweep failure. Hover the mouse over the input for a detailed description.
 5. Review the automatically calculated **tooth crest width S (crest flat)**, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type. The profile-status area directly below the H and angle inputs reports any automatic correction.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
 
@@ -155,7 +157,8 @@ result = thread_tool.generate_thread(
     feature_name='Lid_Internal_Thread',
     max_turns_per_sweep=4,
     flank_angle_degrees=30,
-    deviation_ratio=0.5,
+    deviation_ratio=0.25,
+    enable_lead=True,
 )
 print(result)
 ```
@@ -173,7 +176,8 @@ payload = {
     'feature_name': 'Lid_Internal_Thread',
     'max_turns_per_sweep': 4,
     'flank_angle_degrees': 30,
-    'deviation_ratio': 0.5,
+    'deviation_ratio': 0.25,
+    'enable_lead': True,
 }
 
 result = thread_tool.generate_thread_from_json(payload)
@@ -200,8 +204,8 @@ string. Its result is a JSON-serializable dictionary containing:
 - The calculated tooth crest width `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` must be at least `0.2 mm`.
 - `samples_per_turn` has a minimum effective value of `4`. It is used as a
   lower bound: for large cylinder radii the add-in automatically raises it so
-  the fitted helix stays within half the tooth height of the cylinder surface,
-  which keeps the sweep on the guide face and avoids `ASM_SWEEP_ILLEGAL_SURFACE`. The
+  the fitted helix stays within a quarter of the tooth height of the cylinder
+  surface, which keeps the sweep on the guide face and avoids `ASM_SWEEP_ILLEGAL_SURFACE`. The
   effective value is clamped to a maximum of `360` per turn. If the adaptive
   per-turn density would push the total sample count beyond `20000`, the turn
   count is reduced instead of the sampling density, so every retained turn
@@ -209,17 +213,22 @@ string. Its result is a JSON-serializable dictionary containing:
 - `max_turns_per_sweep` defaults to `4`. Long threads are swept in multiple
   sections to avoid Fusion kernel failures. The linked pitch formula remains
   unchanged.
-- `deviation_ratio` defaults to `0.5` (i.e. `HELIX_DEVIATION_TOLERANCE_RATIO`)
+- `deviation_ratio` defaults to `0.25` (i.e. `HELIX_DEVIATION_TOLERANCE_RATIO`)
   and must be in `(0, 1]`. It is the maximum allowed deviation of the fitted
   helix spline from the cylinder surface as a fraction of the tooth height H
   (allowed deviation = `deviation_ratio * tooth_height_mm`). Lower values use
   more samples per turn for smoother tooth flanks but generate more slowly;
   values that are too large may cause `ASM_SWEEP_ILLEGAL_SURFACE`. Recommended
-  range: `0.2–0.5`. The returned dict reports the effective value in the
+  range: `0.1–0.5`. The returned dict reports the effective value in the
   `deviation_ratio` field.
+- `enable_lead` defaults to `True`: the first and last 1/8 turn of the thread
+  ramp the section (tooth height + width) from 10% to full size, making it
+  easier to start the mating part and keeping both ends print-friendly.
+  Set it to `False` to generate a full-height legacy thread.
 - One generation call creates one helix sketch, one profile plane, and one
-  profile sketch. Later sweep sections continue from the previous section's
-  end face while retaining the cylindrical guide surface.
+  profile sketch. Later sweep sections draw their own trapezoid at each path
+  start while retaining the cylindrical guide surface; adjacent segments
+  overlap slightly at the seam so the boolean join is robust.
 - All features created by one successful generation call are collected in one
   Fusion timeline group named `<feature_name>_Generation` when Fusion allows
   grouping. If grouping is not possible (for example, the affected timeline

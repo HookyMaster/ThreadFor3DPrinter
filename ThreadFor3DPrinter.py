@@ -378,7 +378,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                     end_offset_mm=0.0, samples_per_turn=16,
                     join_to_target=False, feature_name='GeneratedThread',
                     max_turns_per_sweep=4, flank_angle_degrees=45.0,
-                    deviation_ratio=None):
+                    deviation_ratio=None, enable_lead=True):
     """Generate a printable trapezoidal thread without opening the GUI.
 
     Args:
@@ -394,12 +394,17 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         deviation_ratio: Helix deviation as a fraction of tooth height
             (default HELIX_DEVIATION_TOLERANCE_RATIO = 0.25). Lower values
             increase sampling density and surface smoothness.
+        enable_lead: If True (default), entrance and exit lead-in/lead-out
+            ramps are applied (1/8 turn each, section scaled from
+            LEAD_IN_START_SCALE up to full size and back). If False, a
+            full-height legacy thread is generated.
 
     Note:
-        Entrance and exit ramps are currently always applied (TESTING): the
-        first LEAD_IN_TURNS ramp the section from LEAD_IN_START_SCALE (10%)
-        up to full size, and the last LEAD_OUT_TURNS ramp it back down; both
-        are lofted with LEAD_IN_SECTIONS sections.
+        The ramps are lofted with LEAD_IN_SECTIONS sections; the loft helix
+        is shifted by L/2 along the axis so the loft trapezoids ride the
+        sweep helix, and the tooth root is embedded
+        (THREAD_ROOT_EMBED_CM) below the cylinder surface for a robust
+        boolean join.
 
     Returns:
         A JSON-serialisable dict describing the generated thread.
@@ -477,10 +482,10 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     # ── Entrance/exit ramps (TESTING): short ramps where the trapezoid grows
     # from a small tip section to full size, so a mating part slides in and
     # both ends stay print-friendly. ──
-    lead_in_turns = LEAD_IN_TURNS if LEAD_IN_TURNS > 0 else 0.0
+    lead_in_turns = LEAD_IN_TURNS if (enable_lead and LEAD_IN_TURNS > 0) else 0.0
     lead_in_turns = min(lead_in_turns, max(0.0, turns - 0.5))
     use_lead_in = lead_in_turns > 1e-6
-    lead_out_turns = LEAD_OUT_TURNS if LEAD_OUT_TURNS > 0 else 0.0
+    lead_out_turns = LEAD_OUT_TURNS if (enable_lead and LEAD_OUT_TURNS > 0) else 0.0
     lead_out_turns = min(lead_out_turns, max(0.0, turns - lead_in_turns - 0.5))
     use_lead_out = lead_out_turns > 1e-6
     lead_body = None
@@ -959,7 +964,7 @@ def generate_thread_from_json(payload):
     Optional fields:
         tooth_width_mm, tooth_height_mm, end_offset_mm,
         samples_per_turn, join_to_target, feature_name,
-        max_turns_per_sweep, flank_angle_degrees
+        max_turns_per_sweep, flank_angle_degrees, enable_lead
     """
     if isinstance(payload, str):
         payload = json.loads(payload)
@@ -991,6 +996,7 @@ def generate_thread_from_json(payload):
         max_turns_per_sweep=payload.get('max_turns_per_sweep', 4),
         flank_angle_degrees=payload.get('flank_angle_degrees', 45.0),
         deviation_ratio=payload.get('deviation_ratio', None),
+        enable_lead=bool(payload.get('enable_lead', True)),
     )
 
 
@@ -1033,6 +1039,15 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
                 adsk.core.ValueInput.createByReal(16))
             inputs.addValueInput('offset', '端面偏移', 'mm',
                 adsk.core.ValueInput.createByString('0 mm'))
+
+            lead_inp = inputs.addBoolValueInput(
+                'enable_lead', '螺纹收口', True, '', True)
+            lead_inp.tooltip = '在螺纹两端生成 1/8 圈渐变收口，更易旋入'
+            lead_inp.tooltipDescription = (
+                '勾选后，螺纹入口/出口各生成 1/8 圈渐变收口'
+                '（牙高+牙宽 10%↔100%），便于螺母/螺杆对位旋入，'
+                '且两端更易打印。<br/><br/>'
+                '取消勾选则生成完整牙高的普通螺纹（旧版行为）。')
 
             join_inp = inputs.addBoolValueInput(
                 'join_target', '合并到圆柱体', True, '', True)
@@ -1287,6 +1302,8 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 inputs.itemById('dev_ratio'))
             join_inp = adsk.core.BoolValueCommandInput.cast(
                 inputs.itemById('join_target'))
+            lead_inp = adsk.core.BoolValueCommandInput.cast(
+                inputs.itemById('enable_lead'))
 
             ratio_val = float(ratio_inp.value)
             if not (0.0 < ratio_val <= 1.0):
@@ -1303,12 +1320,18 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 feature_name='GeneratedThread',
                 flank_angle_degrees=math.degrees(flank_angle.value),
                 deviation_ratio=ratio_val,
+                enable_lead=bool(lead_inp.value),
             )
 
             thread_label = (
                 '外螺纹（螺杆）'
                 if result['thread_type'] == 'external'
                 else '内螺纹（螺母）')
+            lead_msg = (
+                f"入口/出口各 {result['lead_in_turns'] * 8:.0f}/8 圈渐变"
+                '（牙高+牙宽 10%↔100%）'
+                if result['lead_in_turns'] > 0
+                else '未启用（完整牙高螺纹）')
             message = (
                 f'✓ {thread_label}生成完成！\n\n'
                 f"【截面】L={result['tooth_width_mm']:.2f} mm  "
@@ -1318,7 +1341,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f"【螺旋】P={result['pitch_mm']:.2f} mm  "
                 f"转数={result['turns']}  "
                 f"高度={result['thread_length_mm']:.2f} mm\n"
-                f"【收口】入口/出口各 {result['lead_in_turns'] * 8:.0f}/8 圈渐变（牙高+牙宽 10%↔100%）\n"
+                f"【收口】{lead_msg}\n"
                 f"【结果】{'已合并到圆柱体（实体=1）' if result['joined_to_target'] else '独立螺纹体（实体=2：螺纹+圆柱）'}"
             )
             radius_mm = result['cylinder_radius_mm']
