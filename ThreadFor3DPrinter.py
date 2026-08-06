@@ -28,6 +28,16 @@ MAX_SAMPLES_PER_TURN = 360
 # count is reduced instead of the sampling density, so the path always stays
 # close to the cylinder surface.
 MAX_HELIX_POINTS = 20000
+# Entrance/exit ramps (TESTING, not final): the thread starts and ends with a
+# short ramp where the trapezoid section grows/shrinks between
+# LEAD_IN_START_SCALE and 100% of full size (both tooth height and tooth
+# width), so a mating part slides in instead of hitting a full-height wall and
+# both ends stay print-friendly (no vertical thin walls).
+LEAD_IN_TURNS = 0.125          # entrance ramp length: 1/8 of a turn
+LEAD_OUT_TURNS = 0.125         # exit ramp length: 1/8 of a turn
+LEAD_IN_START_SCALE = 0.10     # section scale at the very tip (10%)
+LEAD_IN_SECTIONS = 5           # loft sections across each ramp
+LEAD_IN_MIN_POINTS = 12        # minimum spline points for a ramp arc
 
 
 def _profile_dimensions(L, H, angle_degrees):
@@ -259,6 +269,43 @@ def _do_sweep(root, profile, helix_spline, guide_face, occurrence=None,
     return sweeps.add(sweep_input)
 
 
+def _ramp_helix_points(face, L, flank_run, ramp_turns, n_points,
+                       offset_cm, total_turns, from_end=False):
+    """在螺旋线入口段或出口段均匀采样（世界坐标）。
+    from_end=False：从起点开始采样 ramp_turns 圈（入口收口）。
+    from_end=True：从终点往前采样 ramp_turns 圈（出口收口），
+    采样顺序仍从靠近终点处开始，便于放样从出口端向主段方向进行。
+    与 _build_helix 使用相同的螺旋参数化，保证两段几何对齐。
+    """
+    # Uniformly sample the entrance or exit portion of the helix.
+    # Same parameterisation as _build_helix so both segments stay aligned.
+    radius, height, h_min, ax, origin = _get_cyl_info(face)
+    P = 2.0 * (L - flank_run)
+    h_start = h_min + offset_cm
+    hh = ramp_turns * P
+    if from_end:
+        # Start sampling at the ramp start (which is ramp_turns before the end)
+        ramp_start_turn = total_turns - ramp_turns
+        h_base = h_start + ramp_start_turn * P
+        angle_base = ramp_start_turn * 2 * math.pi
+    else:
+        h_base = h_start
+        angle_base = 0.0
+    u = _radial_dir(ax)
+    v = ax.crossProduct(u)
+    v.normalize()
+    pts = adsk.core.ObjectCollection.create()
+    for i in range(n_points + 1):
+        t = i / n_points
+        angle = angle_base + t * ramp_turns * 2 * math.pi
+        hz = h_base + t * hh
+        pts.add(adsk.core.Point3D.create(
+            origin.x + hz * ax.x + radius * (math.cos(angle) * u.x + math.sin(angle) * v.x),
+            origin.y + hz * ax.y + radius * (math.cos(angle) * u.y + math.sin(angle) * v.y),
+            origin.z + hz * ax.z + radius * (math.cos(angle) * u.z + math.sin(angle) * v.z)))
+    return pts
+
+
 def generate_thread(face, tooth_width_mm, tooth_height_mm,
                     end_offset_mm=0.0, samples_per_turn=16,
                     join_to_target=False, feature_name='GeneratedThread',
@@ -279,6 +326,12 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         deviation_ratio: Helix deviation as a fraction of tooth height
             (default HELIX_DEVIATION_TOLERANCE_RATIO = 0.5). Lower values
             increase sampling density and surface smoothness.
+
+    Note:
+        Entrance and exit ramps are currently always applied (TESTING): the
+        first LEAD_IN_TURNS ramp the section from LEAD_IN_START_SCALE (10%)
+        up to full size, and the last LEAD_OUT_TURNS ramp it back down; both
+        are lofted with LEAD_IN_SECTIONS sections.
 
     Returns:
         A JSON-serialisable dict describing the generated thread.
@@ -351,40 +404,207 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
 
     safe_name = feature_name or 'GeneratedThread'
     timeline_start_index = design.timeline.count
-    segment_count = int(math.ceil(turns / segment_turn_limit))
+    total_points = pts.count - 1
+
+    # ── Entrance/exit ramps (TESTING): short ramps where the trapezoid grows
+    # from a small tip section to full size, so a mating part slides in and
+    # both ends stay print-friendly. ──
+    lead_in_turns = LEAD_IN_TURNS if LEAD_IN_TURNS > 0 else 0.0
+    lead_in_turns = min(lead_in_turns, max(0.0, turns - 0.5))
+    use_lead_in = lead_in_turns > 1e-6
+    lead_out_turns = LEAD_OUT_TURNS if LEAD_OUT_TURNS > 0 else 0.0
+    lead_out_turns = min(lead_out_turns, max(0.0, turns - lead_in_turns - 0.5))
+    use_lead_out = lead_out_turns > 1e-6
+    lead_body = None
+    lead_out_body = None
+    junction_pt = None
+    exit_junction_pt = None
+    lead_pts = None
+    if use_lead_in:
+        # Fit one spline through a densely sampled copy of the ramp arc.
+        # The main helix point list only contributes ~2 points over 1/8 turn,
+        # which would degenerate into a straight line; sample it independently.
+        # The final sample point is the EXACT junction with the main sweep.
+        lead_pts_world = _ramp_helix_points(
+            face, L_cm, flank_run_cm, lead_in_turns, LEAD_IN_MIN_POINTS,
+            offset_cm, turns)
+        if occurrence:
+            lead_pts = adsk.core.ObjectCollection.create()
+            for i in range(lead_pts_world.count):
+                pt = lead_pts_world.item(i).copy()
+                pt.transformBy(inv)
+                lead_pts.add(pt)
+        else:
+            lead_pts = lead_pts_world
+        junction_pt = lead_pts.item(lead_pts.count - 1)
+    if use_lead_out:
+        # Exit ramp: samples run from the junction (full size) towards the
+        # helix end. The first sample point is the EXACT junction with the
+        # main sweep.
+        exit_pts_world = _ramp_helix_points(
+            face, L_cm, flank_run_cm, lead_out_turns, LEAD_IN_MIN_POINTS,
+            offset_cm, turns, from_end=True)
+        if occurrence:
+            exit_pts = adsk.core.ObjectCollection.create()
+            for i in range(exit_pts_world.count):
+                pt = exit_pts_world.item(i).copy()
+                pt.transformBy(inv)
+                exit_pts.add(pt)
+        else:
+            exit_pts = exit_pts_world
+        exit_junction_pt = exit_pts.item(0)
+
+    # ── Main sweep path: the first segment starts at the exact junction point
+    # (not the nearest coarse sample), so the sweep start is aligned with the
+    # loft end. Same for the last segment and the exit junction. ──
+    # Points are laid out uniformly across all turns, so map turn boundaries
+    # to point indices proportionally. Indexing by the requested pts_per_turn
+    # would be wrong once adaptive sampling raises the effective density.
+    main_start_turn = lead_in_turns if use_lead_in else 0.0
+    main_end_turn = turns - lead_out_turns if use_lead_out else turns
+    # Segment boundaries fall on WHOLE turns (multiples of segment_turn_limit)
+    # wherever possible, exactly like the pre-ramp version. At a whole-turn
+    # boundary the shared sample's angular direction matches the helix start
+    # (0 deg), so two independently fitted splines are tangent-continuous at
+    # that point and the guided sweep stays legal. Only the FIRST segment
+    # starts at the lead-in junction and the LAST segment ends at the lead-out
+    # junction (both non-integer; unavoidable, and handled by the lofts).
+    boundaries = [main_start_turn]
+    b = float(
+        math.ceil(main_start_turn / segment_turn_limit - 1e-9)
+        * segment_turn_limit)
+    while b < main_end_turn - 1e-9:
+        # Guard against a duplicate boundary (e.g. main_start_turn=0 gives
+        # ceil(-1e-9)=0 -> b=0, which already equals boundaries[0]).
+        if b > boundaries[-1] + 1e-9:
+            boundaries.append(b)
+        b += segment_turn_limit
+    boundaries.append(main_end_turn)
+    # De-duplicate the closing boundary as well, then drop any empty segment
+    # (happens when main_start_turn is itself a whole turn).
+    cleaned = []
+    for t in boundaries:
+        if not cleaned or t > cleaned[-1] + 1e-9:
+            cleaned.append(t)
+    boundaries = cleaned
+    segment_count = len(boundaries) - 1
     sketch_helix = comp.sketches.add(comp.xYConstructionPlane)
     sketch_helix.name = safe_name + '_Helix'
     sketch_helix.isComputeDeferred = True
     segment_splines = []
-
-    # Points are laid out uniformly across all turns, so map turn boundaries
-    # to point indices proportionally. Indexing by the requested pts_per_turn
-    # would be wrong once adaptive sampling raises the effective density.
-    total_points = pts.count - 1
+    segment_start_pts = []
     for segment_index in range(segment_count):
-        first_turn = segment_index * segment_turn_limit
-        last_turn = min(turns, first_turn + segment_turn_limit)
-        first_point = int(round(first_turn / turns * total_points))
+        first_turn = boundaries[segment_index]
+        last_turn = boundaries[segment_index + 1]
+        # floor: the last coarse sample must never land past a non-integer
+        # turn boundary. With round() the last sample of the exit ramp can sit
+        # AFTER the exit junction (e.g. 3.9 turns vs the 3.875 junction),
+        # which makes the fitted path fold back on itself and the guided sweep
+        # is rejected (ASM_SWEEP_ILLEGAL_SURFACE).
         last_point = min(total_points,
-                         int(round(last_turn / turns * total_points)))
+                         int(math.floor(last_turn / turns * total_points)))
         segment_points = adsk.core.ObjectCollection.create()
-        for point_index in range(first_point, last_point + 1):
+        if segment_index == 0 and use_lead_in:
+            segment_points.add(junction_pt)
+            start_index = int(math.ceil(
+                main_start_turn / turns * total_points))
+            # Skip the first coarse sample if it coincides with the junction
+            # (happens when the junction lands exactly on a sample point);
+            # duplicate points would break the spline fit.
+            if start_index <= last_point:
+                candidate = pts.item(start_index)
+                if candidate.distanceTo(junction_pt) < 1e-6:
+                    start_index += 1
+        else:
+            # Segment boundaries are non-integer turns (e.g. 4.125 with a
+            # lead-in ramp); floor keeps this segment's first sample exactly
+            # shared with the previous segment's last sample (which is also
+            # computed with floor), so consecutive splines share one point
+            # and the sweep end-face aligns with the next path start.
+            start_index = int(math.floor(
+                first_turn / turns * total_points))
+        for point_index in range(start_index, last_point + 1):
             segment_points.add(pts.item(point_index))
+        if segment_index == segment_count - 1 and use_lead_out:
+            # End at the exact exit junction point instead of the nearest
+            # coarse sample, mirroring the entrance handling.
+            if segment_points.count > 0:
+                candidate = segment_points.item(segment_points.count - 1)
+                if candidate.distanceTo(exit_junction_pt) < 1e-6:
+                    segment_points.removeByIndex(segment_points.count - 1)
+            segment_points.add(exit_junction_pt)
+        segment_start_pts.append(segment_points.item(0))
         segment_splines.append(
             sketch_helix.sketchCurves.sketchFittedSplines.add(
                 segment_points))
 
     sketch_helix.isComputeDeferred = False
 
+    # Profile plane: perpendicular to the main path at its true start point.
+    # The lead-in loft's last section reuses this very plane so both segments
+    # share one identical seam.
     plane_input = comp.constructionPlanes.createInput()
     plane_input.setByDistanceOnPath(
         segment_splines[0], adsk.core.ValueInput.createByReal(0))
     perp_plane = comp.constructionPlanes.add(plane_input)
     perp_plane.name = safe_name + '_ProfilePlane'
 
+    if use_lead_in:
+        sketch_lead = comp.sketches.add(comp.xYConstructionPlane)
+        sketch_lead.name = safe_name + '_LeadIn_Helix'
+        sketch_lead.isComputeDeferred = True
+        lead_spline = sketch_lead.sketchCurves.sketchFittedSplines.add(
+            lead_pts)
+        sketch_lead.isComputeDeferred = False
+
+        # Entrance scale, raised if needed so the tiny section keeps a
+        # printable short edge.
+        entrance_scale = LEAD_IN_START_SCALE
+        if entrance_scale * short_cm < MIN_SHORT_EDGE_CM:
+            entrance_scale = min(1.0, MIN_SHORT_EDGE_CM / max(short_cm, 1e-9))
+
+        loft_profiles = []
+        for k in range(LEAD_IN_SECTIONS):
+            frac = k / float(LEAD_IN_SECTIONS - 1)
+            scale = entrance_scale + (1.0 - entrance_scale) * frac
+            if k < LEAD_IN_SECTIONS - 1:
+                plane_input_k = comp.constructionPlanes.createInput()
+                plane_input_k.setByDistanceOnPath(
+                    lead_spline, adsk.core.ValueInput.createByReal(frac))
+                section_plane = comp.constructionPlanes.add(plane_input_k)
+                section_plane.name = safe_name + '_LeadIn_Plane_' + str(k)
+                anchor = lead_pts.item(int(round(frac * LEAD_IN_MIN_POINTS)))
+            else:
+                # Last section: identical plane and anchor to the main sweep
+                # start so the seam is exact.
+                section_plane = perp_plane
+                anchor = junction_pt
+            section_sketch, _ = _create_trapezoid(
+                comp, section_plane, face, L_cm * scale, H_cm * scale,
+                angle_degrees, anchor, is_external)
+            section_sketch.name = safe_name + '_LeadIn_Section_' + str(k)
+            if section_sketch.profiles.count == 0:
+                raise RuntimeError(
+                    'Lead-in section did not form a closed region')
+            loft_profiles.append(section_sketch.profiles.item(0))
+
+        loft_features = comp.features.loftFeatures
+        loft_input = loft_features.createInput(
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        for profile in loft_profiles:
+            loft_input.loftSections.add(profile)
+        loft_input.isSolid = True
+        loft_feature = loft_features.add(loft_input)
+        loft_feature.name = safe_name + '_LeadIn_Loft'
+        if loft_feature.bodies.count != 1:
+            raise RuntimeError('Lead-in loft did not produce a single body')
+        lead_body = loft_feature.bodies.item(0)
+        lead_body.name = safe_name + '_LeadIn_Body'
+
+    main_anchor = junction_pt if use_lead_in else pts.item(0)
     sketch_trap, short_cm = _create_trapezoid(
         comp, perp_plane, face, L_cm, H_cm, angle_degrees,
-        pts.item(0), is_external)
+        main_anchor, is_external)
     sketch_trap.name = safe_name + '_Profile'
     if sketch_trap.profiles.count == 0:
         raise RuntimeError('Thread profile did not form a closed region')
@@ -397,10 +617,34 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
             else '_Segment_' + str(segment_index + 1))
         segment_name = safe_name + suffix
 
-        source_body = (
-            sweep_profile.body
-            if adsk.fusion.BRepFace.cast(sweep_profile)
-            else None)
+        if segment_index > 0:
+            # Draw a fresh full-size trapezoid on a plane perpendicular to
+            # THIS segment's path at its exact start point. The sweep endFaces
+            # are NOT reused as the next profile: their order is not reliable
+            # (endFaces.item(0) can be the START face, making the next sweep
+            # begin at the wrong end). With whole-turn segment boundaries the
+            # two fitted splines are tangent-continuous at the shared start
+            # point, so this profile is exactly aligned with the previous
+            # segment's end section.
+            seg_plane_input = comp.constructionPlanes.createInput()
+            seg_plane_input.setByDistanceOnPath(
+                spline, adsk.core.ValueInput.createByReal(0))
+            seg_plane = comp.constructionPlanes.add(seg_plane_input)
+            seg_plane.name = safe_name + '_SegPlane_' + str(segment_index)
+            seg_sketch, _ = _create_trapezoid(
+                comp, seg_plane, face, L_cm, H_cm, angle_degrees,
+                segment_start_pts[segment_index], is_external)
+            seg_sketch.name = safe_name + '_SegProfile_' + str(segment_index)
+            if seg_sketch.profiles.count == 0:
+                raise RuntimeError(
+                    'Segment profile did not form a closed region')
+            sweep_profile = seg_sketch.profiles.item(0)
+            source_body = None
+        else:
+            source_body = (
+                sweep_profile.body
+                if adsk.fusion.BRepFace.cast(sweep_profile)
+                else None)
         sweep_feature = _do_sweep(
             comp, sweep_profile, spline, face, occurrence)
         sweep_feature.name = segment_name + '_Sweep'
@@ -417,18 +661,71 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         segment_body = new_bodies[0]
         segment_body.name = segment_name + '_Body'
         segment_bodies.append(segment_body)
-        if segment_index + 1 < segment_count:
-            end_faces = sweep_feature.endFaces
-            if not end_faces or end_faces.count != 1:
-                raise RuntimeError(
-                    'Expected one end face in sweep segment ' +
-                    str(segment_index + 1))
-            sweep_profile = end_faces.item(0)
+        # NO chaining via sweep_feature.endFaces: with per-segment profiles the
+        # next segment already has its own aligned profile above.
 
-    thread_body = segment_bodies[0]
-    if len(segment_bodies) > 1:
+    # ── Exit ramp (TESTING): mirrors the entrance ramp. The first loft
+    # section is a FULL-SIZE trapezoid at the sweep's end junction (drawn on
+    # a plane perpendicular to the exit path at its start), so the loft starts
+    # from the same trapezoid section that ends the main sweep; it then
+    # shrinks towards the helix end. All sections are sketch trapezoids, the
+    # same topology as the sweep profile, avoiding BRepFace-mixing issues. ──
+    if use_lead_out:
+        sketch_exit = comp.sketches.add(comp.xYConstructionPlane)
+        sketch_exit.name = safe_name + '_LeadOut_Helix'
+        sketch_exit.isComputeDeferred = True
+        exit_spline = sketch_exit.sketchCurves.sketchFittedSplines.add(
+            exit_pts)
+        sketch_exit.isComputeDeferred = False
+
+        exit_scale = LEAD_IN_START_SCALE
+        if exit_scale * short_cm < MIN_SHORT_EDGE_CM:
+            exit_scale = min(1.0, MIN_SHORT_EDGE_CM / max(short_cm, 1e-9))
+
+        loft_profiles = []
+        for k in range(LEAD_IN_SECTIONS):
+            frac = k / float(LEAD_IN_SECTIONS - 1)
+            # k=0 starts at FULL size (scale 1.0) at the sweep end junction,
+            # then shrinks linearly down to exit_scale at the helix end.
+            scale = 1.0 - (1.0 - exit_scale) * frac
+            plane_input_k = comp.constructionPlanes.createInput()
+            plane_input_k.setByDistanceOnPath(
+                exit_spline, adsk.core.ValueInput.createByReal(frac))
+            section_plane = comp.constructionPlanes.add(plane_input_k)
+            section_plane.name = safe_name + '_LeadOut_Plane_' + str(k)
+            anchor = exit_pts.item(int(round(frac * LEAD_IN_MIN_POINTS)))
+            section_sketch, _ = _create_trapezoid(
+                comp, section_plane, face, L_cm * scale, H_cm * scale,
+                angle_degrees, anchor, is_external)
+            section_sketch.name = safe_name + '_LeadOut_Section_' + str(k)
+            if section_sketch.profiles.count == 0:
+                raise RuntimeError(
+                    'Exit section did not form a closed region')
+            loft_profiles.append(section_sketch.profiles.item(0))
+
+        loft_features = comp.features.loftFeatures
+        loft_input = loft_features.createInput(
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+        for profile in loft_profiles:
+            loft_input.loftSections.add(profile)
+        loft_input.isSolid = True
+        loft_feature = loft_features.add(loft_input)
+        loft_feature.name = safe_name + '_LeadOut_Loft'
+        if loft_feature.bodies.count != 1:
+            raise RuntimeError('Exit loft did not produce a single body')
+        lead_out_body = loft_feature.bodies.item(0)
+        lead_out_body.name = safe_name + '_LeadOut_Body'
+
+    all_bodies = []
+    if use_lead_in:
+        all_bodies.append(lead_body)
+    all_bodies.extend(segment_bodies)
+    if use_lead_out:
+        all_bodies.append(lead_out_body)
+    thread_body = all_bodies[0]
+    if len(all_bodies) > 1:
         tools = adsk.core.ObjectCollection.create()
-        for segment_body in segment_bodies[1:]:
+        for segment_body in all_bodies[1:]:
             tools.add(segment_body)
         combine_input = comp.features.combineFeatures.createInput(
             thread_body, tools)
@@ -480,6 +777,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         'end_offset_mm': offset_cm * 10.0,
         'samples_per_turn': pts_per_turn,
         'deviation_ratio': deviation_ratio,
+        'lead_in_turns': lead_in_turns,
+        'lead_out_turns': lead_out_turns,
         'segment_count': segment_count,
         'max_turns_per_sweep': segment_turn_limit,
         'cylinder_radius_mm': radius * 10.0,
@@ -858,6 +1157,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f"【螺旋】P={result['pitch_mm']:.2f} mm  "
                 f"转数={result['turns']}  "
                 f"高度={result['thread_length_mm']:.2f} mm\n"
+                f"【收口】入口/出口各 {result['lead_in_turns'] * 8:.0f}/8 圈渐变（牙高+牙宽 10%↔100%）\n"
                 f"【结果】{'已合并到圆柱体（实体=1）' if result['joined_to_target'] else '独立螺纹体（实体=2：螺纹+圆柱）'}"
             )
             radius_mm = result['cylinder_radius_mm']
