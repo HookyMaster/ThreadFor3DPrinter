@@ -50,7 +50,18 @@ LEAD_IN_MIN_POINTS = 12        # minimum spline points for a ramp arc
 # the coincident faces). 0.03 turns of overlap disappears into the main
 # thread visually and does not change the thread dimensions (union keeps
 # the outer surface, the overlapping full-size section is fully contained).
-LEAD_OVERLAP_TURNS = 0.03
+LEAD_OVERLAP_TURNS = 0.10  # ramp bodies overlap the main body / adjacent
+                           # segments by this many turns. 0.03 was too small:
+                           # on some EXTERNAL geometries (D34.6/H10 L3/H1) the
+                           # loft only edge-touches the sweep, and the boolean
+                           # join fails silently (the combine feature turns
+                           # red while add() still returns, leaving disjoint
+                           # bodies). 0.10 gives a solid ~0.4 mm overlap.
+LEAD_OVERLAP_TURNS_INTERNAL = 0.05  # INTERNAL threads need a SMALLER overlap:
+                                    # with 0.10 the loft/main-sweep join of a
+                                    # D110/H33 L1.6/H0.6 internal thread fails
+                                    # with ASM_NULL_PARTNER_LOOP, while 0.05
+                                    # and 0.03 both pass (verified via MCP).
 THREAD_ROOT_EMBED_CM = 0.002   # 0.02 mm: loft root sinks below the cylinder
                                # face so the union has real volume overlap
 # A sweep segment shorter than this is merged into its neighbour. With the
@@ -203,8 +214,10 @@ def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0,
         # helix itself stops L short of the face:
         #   material_end = offset + N*P + L <= height
         #   -> N = (height - offset - L) / P
-        # The -1e-9 is a nanometer-scale float guard only.
-        N_frac = (usable - L) / P - 1e-9
+        # The turn count is floored to 4 decimals: that is sub-micron
+        # precision on the material end and keeps the value tidy, while the
+        # floor guarantees the path never crosses the top face.
+        N_frac = math.floor((usable - L) / P * 1e4) / 1e4
         if N_frac >= 1.0:
             N = N_frac
         else:
@@ -473,6 +486,14 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         raise RuntimeError('No active Fusion design')
 
     is_external = _is_external_face(face)
+    # External threads need a LARGER ramp overlap (0.10) or the loft can
+    # edge-touch the sweep and the join fails silently (D34.6/H10 L3/H1);
+    # internal threads instead fail with ASM_NULL_PARTNER_LOOP when the
+    # overlap is 0.10 (D110/H33 L1.6/H0.6) and pass at 0.05. Split the
+    # constant per thread type.
+    overlap_turns = (
+        LEAD_OVERLAP_TURNS if is_external
+        else LEAD_OVERLAP_TURNS_INTERNAL)
     radius, cylinder_height, _, _, _ = _get_cyl_info(face)
     if not is_external and H_cm >= radius:
         raise ValueError('Internal thread tooth height must be smaller than the hole radius')
@@ -549,7 +570,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # join succeeds (a face-to-face seam would fail with ASM_INCONS_FACE).
         lead_pts_world = _ramp_helix_points(
             face, L_cm, flank_run_cm,
-            lead_in_turns + LEAD_OVERLAP_TURNS, LEAD_IN_MIN_POINTS,
+            lead_in_turns + overlap_turns, LEAD_IN_MIN_POINTS,
             offset_cm, turns)
         lead_pts_shift_world = _shift_points(lead_pts_world, ramp_shift_cm)
         if occurrence:
@@ -568,7 +589,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # The junction is where the ramp reaches full size (lead_in_turns),
         # NOT the last sample: the sample arc extends LEAD_OVERLAP_TURNS
         # beyond it so the loft can overlap the main body.
-        junc_frac = lead_in_turns / (lead_in_turns + LEAD_OVERLAP_TURNS)
+        junc_frac = lead_in_turns / (lead_in_turns + overlap_turns)
     if use_lead_out:
         # Exit ramp: samples run from BEFORE the junction (overlapping the
         # main sweep body) towards the helix end. The first sample sits
@@ -577,7 +598,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # overlap (a face-to-face seam would fail with ASM_INCONS_FACE).
         exit_pts_world = _ramp_helix_points(
             face, L_cm, flank_run_cm,
-            lead_out_turns + LEAD_OVERLAP_TURNS, LEAD_IN_MIN_POINTS,
+            lead_out_turns + overlap_turns, LEAD_IN_MIN_POINTS,
             offset_cm, turns, from_end=True)
         exit_pts_shift_world = _shift_points(exit_pts_world, ramp_shift_cm)
         if occurrence:
@@ -667,11 +688,11 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         if segment_index == 0:
             first_turn = boundaries[segment_index]
         else:
-            first_turn = boundaries[segment_index] - LEAD_OVERLAP_TURNS
+            first_turn = boundaries[segment_index] - overlap_turns
         if segment_index == segment_count - 1:
             last_turn = boundaries[segment_index + 1]
         else:
-            last_turn = boundaries[segment_index + 1] + LEAD_OVERLAP_TURNS
+            last_turn = boundaries[segment_index + 1] + overlap_turns
         # floor: the last coarse sample must never land past a non-integer
         # turn boundary. With round() the last sample of the exit ramp can sit
         # AFTER the exit junction (e.g. 3.9 turns vs the 3.875 junction),
@@ -731,7 +752,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # LAST section (full size) sits past the junction, inside the main
         # sweep body, so the boolean join has real volume overlap instead of
         # two coincident faces (ASM_INCONS_FACE).
-        junc_frac = lead_in_turns / (lead_in_turns + LEAD_OVERLAP_TURNS)
+        junc_frac = lead_in_turns / (lead_in_turns + overlap_turns)
         n_grad = LEAD_IN_SECTIONS - 1
         loft_profiles = []
         for k in range(LEAD_IN_SECTIONS):
@@ -874,8 +895,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         # k=0 (full size) sits in the overlap arc BEFORE the junction, i.e.
         # inside the main sweep body; k=1 sits exactly at the junction, still
         # full size; the remaining sections shrink down to exit_scale.
-        junc_frac_exit = LEAD_OVERLAP_TURNS / (
-            lead_out_turns + LEAD_OVERLAP_TURNS)
+        junc_frac_exit = overlap_turns / (
+            lead_out_turns + overlap_turns)
         n_grad = LEAD_IN_SECTIONS - 1
         loft_profiles = []
         for k in range(LEAD_IN_SECTIONS):
@@ -928,11 +949,27 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     all_bodies.extend(segment_bodies)
     if use_lead_out:
         all_bodies.append(lead_out_body)
-    thread_body = all_bodies[0]
-    if len(all_bodies) > 1:
+    # Use the FIRST SEGMENT body (the large main sweep) as the boolean
+    # target. The ramp lofts are smaller and can be almost fully contained
+    # by it, which the kernel handles reliably. Using a small ramp loft as
+    # the target fails silently on some geometries (the combine feature
+    # turns red while add() still returns, so the bodies stay separate and
+    # the thread looks disjoint, e.g. D34.6/H10 with L3/H1).
+    if segment_bodies:
+        thread_body = segment_bodies[0]
+        tool_bodies = []
+        if use_lead_in:
+            tool_bodies.append(lead_body)
+        tool_bodies.extend(segment_bodies[1:])
+        if use_lead_out:
+            tool_bodies.append(lead_out_body)
+    else:
+        thread_body = all_bodies[0]
+        tool_bodies = all_bodies[1:]
+    if tool_bodies:
         tools = adsk.core.ObjectCollection.create()
-        for segment_body in all_bodies[1:]:
-            tools.add(segment_body)
+        for tool_body in tool_bodies:
+            tools.add(tool_body)
         combine_input = comp.features.combineFeatures.createInput(
             thread_body, tools)
         combine_input.operation = (
