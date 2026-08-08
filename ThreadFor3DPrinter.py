@@ -53,6 +53,13 @@ LEAD_IN_MIN_POINTS = 12        # minimum spline points for a ramp arc
 LEAD_OVERLAP_TURNS = 0.03
 THREAD_ROOT_EMBED_CM = 0.002   # 0.02 mm: loft root sinks below the cylinder
                                # face so the union has real volume overlap
+# A sweep segment shorter than this is merged into its neighbour. With the
+# full-fill non-integer turn count, the last whole-turn boundary can land
+# just barely before the lead-out junction (e.g. [0.125, 4, 4.075]), leaving
+# a ~0.075-turn stub with only 2-3 spline samples: the stub spline degrades
+# and its body overlaps the lead-out loft by almost nothing, so the internal
+# boolean join fails (ASM_INCONS_REL). Merging restores a healthy tail.
+MIN_SEGMENT_TURNS = 1.0
 
 
 def _profile_dimensions(L, H, angle_degrees):
@@ -178,13 +185,32 @@ def _radial_dir(ax):
 
 
 def _build_helix(face, L, flank_run, pts_per_turn, offset_cm=0,
-                 tooth_height_mm=1.0, deviation_ratio=None):
-    """生成螺旋线点列。offset_cm: 螺旋线起点距圆柱底端的偏移"""
+                 tooth_height_mm=1.0, deviation_ratio=None,
+                 fill_end=False):
+    """生成螺旋线点列。offset_cm: 螺旋线起点距圆柱底端的偏移
+    fill_end=True: 满算模式（无收口）——圈数取非整数 (height-offset-L)/P，
+    螺纹材料末端（螺旋终点 + 牙宽 L）恰好落在上端面、绝不超出；
+    矮圆柱（不足 1 圈）回退旧逻辑。
+    """
     # Generate helix point sequence. offset_cm: offset from cylinder bottom to helix start
     radius, height, h_min, ax, origin = _get_cyl_info(face)
     P = 2.0 * (L - flank_run)
     usable = height - offset_cm
-    N = max(1, int(usable / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
+    if fill_end:
+        # Full-fill mode (no lead ramps): the thread MATERIAL (which extends
+        # one tooth width L past the helix end because the trapezoid's long
+        # edge runs along the axis) must end exactly on the top face, so the
+        # helix itself stops L short of the face:
+        #   material_end = offset + N*P + L <= height
+        #   -> N = (height - offset - L) / P
+        # The -1e-9 is a nanometer-scale float guard only.
+        N_frac = (usable - L) / P - 1e-9
+        if N_frac >= 1.0:
+            N = N_frac
+        else:
+            N = max(1, int(usable / P + 1e-9) - 1)  # too short: fall back
+    else:
+        N = max(1, int(usable / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
     # Reserve one full turn of space
     # Adapt sample density to the radius; if the point budget is exceeded the
     # turn count is reduced (not the sampling density) so the path always hugs
@@ -461,7 +487,8 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
 
     pts, turns, helix_height, pitch, radius = _build_helix(
         face, L_cm, flank_run_cm, pts_per_turn, offset_cm,
-        tooth_height_mm=H_cm * 10.0, deviation_ratio=deviation_ratio)
+        tooth_height_mm=H_cm * 10.0, deviation_ratio=deviation_ratio,
+        fill_end=True)
     if turns < 1 or helix_height <= 0:
         raise ValueError('Selected cylinder is too short for the requested thread and offset')
 
@@ -605,6 +632,19 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         if not cleaned or t > cleaned[-1] + 1e-9:
             cleaned.append(t)
     boundaries = cleaned
+    # Short-segment guard: merge any tail segment shorter than one turn into
+    # the previous one (the final main_end_turn boundary is always kept; only
+    # interior whole-turn boundaries are dropped). Prevents the degenerate
+    # stub segment described at MIN_SEGMENT_TURNS.
+    merged = [boundaries[0]]
+    for t in boundaries[1:-1]:
+        if t - merged[-1] >= MIN_SEGMENT_TURNS - 1e-9:
+            merged.append(t)
+    while (len(merged) > 1 and
+           boundaries[-1] - merged[-1] < MIN_SEGMENT_TURNS - 1e-9):
+        merged.pop()
+    merged.append(boundaries[-1])
+    boundaries = merged
     segment_count = len(boundaries) - 1
     # First main-sweep segment starts at the first native sample at/after the
     # main start turn. Computed here so the lead-in loft's final full-size
