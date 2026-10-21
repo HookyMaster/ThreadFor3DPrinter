@@ -524,6 +524,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         pts = local_pts
 
     safe_name = feature_name or 'GeneratedThread'
+    created_sketches = []  # all sketches created during generation, hidden at the end
     timeline_start_index = design.timeline.count
     total_points = pts.count - 1
 
@@ -674,6 +675,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         main_start_turn / turns * total_points)) if use_lead_in else 0
     sketch_helix = comp.sketches.add(comp.xYConstructionPlane)
     sketch_helix.name = safe_name + '_Helix'
+    created_sketches.append(sketch_helix)
     sketch_helix.isComputeDeferred = True
     segment_splines = []
     segment_start_pts = []
@@ -736,6 +738,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     if use_lead_in:
         sketch_lead = comp.sketches.add(comp.xYConstructionPlane)
         sketch_lead.name = safe_name + '_LeadIn_Helix'
+        created_sketches.append(sketch_lead)
         sketch_lead.isComputeDeferred = True
         lead_spline = sketch_lead.sketchCurves.sketchFittedSplines.add(
             lead_shifted)
@@ -780,6 +783,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 center_on_anchor=True,
                 root_embed_cm=THREAD_ROOT_EMBED_CM)
             section_sketch.name = safe_name + '_LeadIn_Section_' + str(k)
+            created_sketches.append(section_sketch)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
                     'Lead-in section did not form a closed region')
@@ -804,6 +808,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
         main_anchor, is_external,
         root_embed_cm=THREAD_ROOT_EMBED_CM)
     sketch_trap.name = safe_name + '_Profile'
+    created_sketches.append(sketch_trap)
     if sketch_trap.profiles.count == 0:
         raise RuntimeError('Thread profile did not form a closed region')
 
@@ -834,6 +839,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 segment_start_pts[segment_index], is_external,
                 root_embed_cm=THREAD_ROOT_EMBED_CM)
             seg_sketch.name = safe_name + '_SegProfile_' + str(segment_index)
+            created_sketches.append(seg_sketch)
             if seg_sketch.profiles.count == 0:
                 raise RuntimeError(
                     'Segment profile did not form a closed region')
@@ -883,6 +889,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
     if use_lead_out:
         sketch_exit = comp.sketches.add(comp.xYConstructionPlane)
         sketch_exit.name = safe_name + '_LeadOut_Helix'
+        created_sketches.append(sketch_exit)
         sketch_exit.isComputeDeferred = True
         exit_spline = sketch_exit.sketchCurves.sketchFittedSplines.add(
             exit_shifted)
@@ -925,6 +932,7 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 center_on_anchor=True,
                 root_embed_cm=THREAD_ROOT_EMBED_CM)
             section_sketch.name = safe_name + '_LeadOut_Section_' + str(k)
+            created_sketches.append(section_sketch)
             if section_sketch.profiles.count == 0:
                 raise RuntimeError(
                     'Exit section did not form a closed region')
@@ -1005,6 +1013,15 @@ def generate_thread(face, tooth_width_mm, tooth_height_mm,
                 timeline_group_name = timeline_group.name
     except Exception:
         pass  # timeline grouping is cosmetic; never fail the generation
+
+    # Hide all sketches created during generation (cosmetic; never fail).
+    # The sketches stay in the timeline/browser and can be re-shown there.
+    try:
+        for sk in created_sketches:
+            if sk:
+                sk.isVisible = False
+    except Exception:
+        pass
 
     app.activeViewport.fit()
     return {
@@ -1516,6 +1533,13 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             # ── 步骤5：Sweep ──
             # ── Step 5: Sweep ──
             sweep_feature = _do_sweep(comp, profile, spline, face, occ)
+
+            # 隐藏生成过程草图（仅外观处理，失败不影响结果）
+            try:
+                sketch_helix.isVisible = False
+                sketch_trap.isVisible = False
+            except Exception:
+                pass
 
             _app.activeViewport.fit()
 
