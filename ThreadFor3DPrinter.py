@@ -12,8 +12,11 @@ PROFILE_TOLERANCE_CM = 1e-7
 MIN_SHORT_EDGE_CM = 0.02  # 0.2 mm; avoids a degenerate/self-intersecting profile
 # Recommended radial clearance (per side, mm) for 3D-printed mating threads.
 # FDM prints typically need 0.2-0.4 mm per side to assemble without force;
-# 0.3 mm is a common middle ground. Shown as a suggestion in the result dialog.
-RECOMMENDED_CLEARANCE_MM = 0.3
+# 0.2 mm is the default starting point (tighter fit, still printable on a
+# well-calibrated machine). Shown as a suggestion in the result dialog.
+# NOTE: every derived figure (diametral clearance = 2 x this, suggested mating
+# diameter, dialog text) is computed from this constant - change it here only.
+RECOMMENDED_CLEARANCE_MM = 0.2
 # Maximum allowed deviation between the fitted helix spline and the true
 # cylinder surface, expressed as a fraction of the tooth height H.  The sweep
 # guides the profile along the cylinder face; if the path strays further than
@@ -1441,7 +1444,7 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             radius_mm = result['cylinder_radius_mm']
             height_mm = result['tooth_height_mm']
             clr = RECOMMENDED_CLEARANCE_MM
-            dia_clr = 2 * clr
+            dia_clr = 2 * clr  # per-side clearance -> diametral clearance
             if result['thread_type'] == 'external':
                 base_diameter = 2 * radius_mm + 2 * height_mm
                 suggested = base_diameter + dia_clr
@@ -1552,19 +1555,22 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
                 f'【结果】 实体={sweep_feature.bodies.count}'
             )
             R_mm = radius * 10
+            clr = RECOMMENDED_CLEARANCE_MM
             if is_external:
                 nut_dia = 2 * R_mm + 2 * H_cm * 10
                 msg += (
                     f'\n\n📌 配合螺母建议内径：\n'
                     f'  螺母内径 ≈ 圆柱外径({2*R_mm:.1f}mm) + {2*H_cm*10:.1f}mm (2×H) + 间隙\n'
-                    f'              = {nut_dia:.1f}mm + 间隙（建议 0.3~0.5mm）'
+                    f'              = {nut_dia:.1f}mm + 间隙'
+                    f'（建议单侧 {clr:.1f}mm，即直径 +{2 * clr:.1f}mm ≈ {nut_dia + 2 * clr:.1f}mm）'
                 )
             else:
                 screw_dia = 2 * R_mm - 2 * H_cm * 10
                 msg += (
                     f'\n\n📌 配合螺杆建议外径：\n'
                     f'  螺杆外径 ≈ 圆孔内径({2*R_mm:.1f}mm) - {2*H_cm*10:.1f}mm (2×H) - 间隙\n'
-                    f'              = {screw_dia:.1f}mm - 间隙（建议 0.3~0.5mm）'
+                    f'              = {screw_dia:.1f}mm - 间隙'
+                    f'（建议单侧 {clr:.1f}mm，即直径 -{2 * clr:.1f}mm ≈ {screw_dia - 2 * clr:.1f}mm）'
                 )
             _ui.messageBox(msg, '生成成功')
         except:

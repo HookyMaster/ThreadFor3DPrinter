@@ -138,7 +138,7 @@ The sweep is created as a **new body**. Use Fusion's **Combine** command to:
 - **Join** it to the cylinder for an external thread.
 - **Join** it to the surrounding part for an internal thread as well.
 
-After generation, the completion dialog also shows a suggested mating diameter. Treat it as a starting point and validate the recommended `0.3–0.5 mm` clearance with a short print test.
+After generation, the completion dialog also shows a suggested mating diameter. Treat it as a starting point and validate the recommended `0.2 mm` per-side clearance (`0.2–0.4 mm` typical range) with a short print test.
 
 For reliable 3D-printed mating parts, add clearance appropriate to your printer, material, layer height, and nozzle size. Test with a short sample before printing the final part.
 
