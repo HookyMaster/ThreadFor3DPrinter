@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[English README](README.md) · [下载 v3.2.0](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.0/ThreadFor3DPrinter-Test-v3.2.0.zip)
+[English README](README.md) · [下载 v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinter-Test-v3.2.1.zip)
 
 <img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
 
@@ -17,6 +17,7 @@
 - 自动识别内、外圆柱面。
 - 默认使用普通模式：输入牙底宽度、牙高和牙侧角，自动联动牙顶宽度与螺距。
 - 点击“专家模式”后，可独立调整螺距、牙顶宽度、牙底宽度和牙高；风险参数只显示警告，不会禁用“确定”。
+- Fusion 使用中文界面时显示中文；其他 Fusion 界面语言自动显示英文。
 - 允许最小 `0.08 mm` 牙顶平宽，避免截面退化或自相交。
 - 可选**螺纹收口**：螺纹入口/出口各生成 1/8 圈渐变（牙高+牙宽 10%↔100%），便于螺母/螺杆对位旋入，且两端更易打印；可在对话框中关闭。
 - 显示估算的螺旋总长和样条线点数，并对高风险采样设置给出提示。

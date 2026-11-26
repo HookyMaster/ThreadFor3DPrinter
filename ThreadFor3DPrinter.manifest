@@ -7,7 +7,7 @@
 		"":	"【测试版】可调螺距与牙顶宽度的3D打印螺纹生成工具 ([TEST] Adjustable pitch and crest width)",
 		"en":	"[TEST] 3D-printable thread generator with adjustable pitch and crest width"
 	},
-	"version":	"3.2.0",
+	"version":	"3.2.1",
 	"runOnStartup":	false,
 	"supportedOS":	"windows|mac",
 	"editEnabled":	true,

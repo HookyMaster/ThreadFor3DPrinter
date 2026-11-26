@@ -5,7 +5,6 @@ _app      = None
 _ui       = None
 _handlers = []
 CMD_ID    = 'threadTool_pitch_crest_test_v1'
-CMD_NAME  = 'ThreadFor3DPrinter [TEST P/S]'
 PRIVACY_URL = 'https://github.com/HookyMaster/ThreadFor3DPrinter/blob/master/docs/PRIVACY.md'
 MIN_FLANK_ANGLE_DEG = 5.0
 MAX_FLANK_ANGLE_DEG = 45.0
@@ -75,6 +74,24 @@ THREAD_ROOT_EMBED_CM = 0.002   # 0.02 mm: loft root sinks below the cylinder
 # and its body overlaps the lead-out loft by almost nothing, so the internal
 # boolean join fails (ASM_INCONS_REL). Merging restores a healthy tail.
 MIN_SEGMENT_TURNS = 1.0
+
+
+def _is_chinese_ui():
+    """Return True when Fusion is configured for Simplified/Traditional Chinese."""
+    try:
+        language = (adsk.core.Application.get().preferences
+                    .generalPreferences.userLanguage)
+        return language in (
+            adsk.core.UserLanguages.ChinesePRCLanguage,
+            adsk.core.UserLanguages.ChineseTaiwanLanguage,
+        )
+    except Exception:
+        return False
+
+
+def _t(chinese, english):
+    """Choose user-visible text from Fusion's configured UI language."""
+    return chinese if _is_chinese_ui() else english
 
 
 def _profile_dimensions(L, H, angle_degrees):
@@ -1147,79 +1164,115 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             inputs = cmd.commandInputs
 
             inputs.addTextBoxCommandInput('hdr', '',
-                '<b>【TEST P/S】螺纹生成工具（外/内螺纹自动识别）</b><br/>'
-                '选择圆柱外表面（螺杆）或圆孔内表面（螺母），自动识别。<br/>'
-                f'<a href="{PRIVACY_URL}">隐私政策 / Privacy Policy</a>', 3, True)
+                _t(
+                    '<b>【TEST P/S】螺纹生成工具（外/内螺纹自动识别）</b><br/>'
+                    '选择圆柱外表面（螺杆）或圆孔内表面（螺母），自动识别。<br/>'
+                    f'<a href="{PRIVACY_URL}">隐私政策</a>',
+                    '<b>[TEST P/S] Thread Generator (auto-detects external/internal)</b><br/>'
+                    'Select an outside cylinder (bolt) or inside hole (nut).<br/>'
+                    f'<a href="{PRIVACY_URL}">Privacy Policy</a>'), 3, True)
 
-            sel = inputs.addSelectionInput('face', '圆柱/圆孔面', '请点击圆柱外表面或圆孔内表面')
+            sel = inputs.addSelectionInput(
+                'face', _t('圆柱/圆孔面', 'Cylinder / hole face'),
+                _t('请点击圆柱外表面或圆孔内表面',
+                   'Select an outside cylinder or inside cylindrical hole'))
             sel.addSelectionFilter('CylindricalFaces')
             sel.setSelectionLimits(1, 1)
 
             inputs.addTextBoxCommandInput('sep1', '',
-                '<b>── 梯形截面参数 ──</b>', 1, True)
+                _t('<b>── 梯形截面参数 ──</b>',
+                   '<b>── Trapezoid profile ──</b>'), 1, True)
             expert_inp = inputs.addBoolValueInput(
-                'expert_mode', '专家模式（独立 P / S / L / H）', True, '', False)
-            expert_inp.tooltip = '关闭时使用原参数联动；开启后四个尺寸可独立设置'
-            pitch_inp = inputs.addValueInput('pitch_P', '螺距 P', 'mm',
+                'expert_mode', _t('专家模式（独立 P / S / L / H）',
+                                  'Expert mode (independent P / S / L / H)'),
+                True, '', False)
+            expert_inp.tooltip = _t(
+                '关闭时使用原参数联动；开启后四个尺寸可独立设置',
+                'Off uses the original linked profile; on edits all four dimensions independently')
+            pitch_inp = inputs.addValueInput(
+                'pitch_P', _t('螺距 P', 'Pitch P'), 'mm',
                 adsk.core.ValueInput.createByString('4 mm'))
-            crest_inp = inputs.addValueInput('crest_S', '牙顶宽度 S', 'mm',
+            crest_inp = inputs.addValueInput(
+                'crest_S', _t('牙顶宽度 S', 'Crest width S'), 'mm',
                 adsk.core.ValueInput.createByString('1 mm'))
             pitch_inp.isVisible = False
             crest_inp.isVisible = False
-            inputs.addValueInput('root_L', '牙底宽度 L', 'mm',
+            inputs.addValueInput('root_L', _t('牙底宽度 L', 'Root width L'), 'mm',
                 adsk.core.ValueInput.createByString('3 mm'))
-            inputs.addValueInput('trap_H', '梯形高度 H（径向牙高）', 'mm',
+            inputs.addValueInput(
+                'trap_H', _t('梯形高度 H（径向牙高）',
+                             'Trapezoid height H (radial tooth height)'), 'mm',
                 adsk.core.ValueInput.createByString('1 mm'))
-            inputs.addValueInput('flank_angle', '牙侧角度 α（普通模式）', 'deg',
+            inputs.addValueInput(
+                'flank_angle', _t('牙侧角度 α（普通模式）',
+                                  'Flank angle α (normal mode)'), 'deg',
                 adsk.core.ValueInput.createByString('45 deg'))
             inputs.addTextBoxCommandInput(
-                'profile_status', '截面状态',
-                '<b>普通模式：S=1.000 mm　P=4.000 mm</b><br/>'
-                '<font color="green">参数由 L / H / α 安全联动</font>', 2, True)
+                'profile_status', _t('截面状态', 'Profile status'),
+                _t('<b>普通模式：S=1.000 mm　P=4.000 mm</b><br/>'
+                   '<font color="green">参数由 L / H / α 安全联动</font>',
+                   '<b>Normal mode: S=1.000 mm  P=4.000 mm</b><br/>'
+                   '<font color="green">L / H / α are safely linked</font>'), 2, True)
 
             inputs.addTextBoxCommandInput('sep2', '',
-                '<b>── 路径参数 ──</b>', 1, True)
-            inputs.addValueInput('ppt', '每圈采样点数', '',
+                _t('<b>── 路径参数 ──</b>', '<b>── Path parameters ──</b>'), 1, True)
+            inputs.addValueInput('ppt', _t('每圈采样点数', 'Points per turn'), '',
                 adsk.core.ValueInput.createByReal(16))
-            inputs.addValueInput('offset', '端面偏移', 'mm',
+            inputs.addValueInput('offset', _t('端面偏移', 'End offset'), 'mm',
                 adsk.core.ValueInput.createByString('0 mm'))
 
             lead_inp = inputs.addBoolValueInput(
-                'enable_lead', '螺纹收口', True, '', True)
-            lead_inp.tooltip = '在螺纹两端生成 1/8 圈渐变收口，更易旋入'
-            lead_inp.tooltipDescription = (
+                'enable_lead', _t('螺纹收口', 'Thread lead-in / lead-out'), True, '', True)
+            lead_inp.tooltip = _t('在螺纹两端生成 1/8 圈渐变收口，更易旋入',
+                                  'Add a 1/8-turn ramp at both ends for easier engagement')
+            lead_inp.tooltipDescription = _t(
                 '勾选后，螺纹入口/出口各生成 1/8 圈渐变收口'
                 '（牙高+牙宽 10%↔100%），便于螺母/螺杆对位旋入，'
                 '且两端更易打印。<br/><br/>'
-                '取消勾选则生成完整牙高的普通螺纹（旧版行为）。')
+                '取消勾选则生成完整牙高的普通螺纹（旧版行为）。',
+                'Adds a 1/8-turn ramp at the entrance and exit (height and width '
+                'scale 10%↔100%) for easier engagement and printing.<br/><br/>'
+                'Clear the option for a full-height legacy thread.')
 
             join_inp = inputs.addBoolValueInput(
-                'join_target', '合并到圆柱体', True, '', True)
-            join_inp.tooltip = '将生成的螺纹与所选圆柱体合并为一个实体'
-            join_inp.tooltipDescription = (
+                'join_target', _t('合并到圆柱体', 'Join to cylinder'), True, '', True)
+            join_inp.tooltip = _t('将生成的螺纹与所选圆柱体合并为一个实体',
+                                  'Join the generated thread and selected cylinder into one body')
+            join_inp.tooltipDescription = _t(
                 '勾选后，螺纹体会通过布尔合并与所选圆柱体合并为单一实体。<br/><br/>'
                 '取消勾选则螺纹与圆柱体保持为两个独立实体（仅贴合）。<br/><br/>'
-                '合并可消除放大时两实体之间的接缝。')
+                '合并可消除放大时两实体之间的接缝。',
+                'Joins the thread to the selected cylinder as one body.<br/><br/>'
+                'Clear the option to keep two separate touching bodies.<br/><br/>'
+                'Joining removes the visible seam between the bodies.')
 
             inputs.addBoolValueInput(
-                'show_advanced', '显示高级选项', False, '', False)
+                'show_advanced', _t('显示高级选项', 'Show advanced options'), False, '', False)
 
             ratio_inp = inputs.addValueInput(
-                'dev_ratio', '路径偏差系数', '',
+                'dev_ratio', _t('路径偏差系数', 'Path deviation ratio'), '',
                 adsk.core.ValueInput.createByReal(
                     HELIX_DEVIATION_TOLERANCE_RATIO))
             ratio_inp.isVisible = False
-            ratio_inp.tooltip = '路径偏差占牙高的比例（0.1–1.0）'
-            ratio_inp.tooltipDescription = (
+            ratio_inp.tooltip = _t('路径偏差占牙高的比例（0.1–1.0）',
+                                   'Allowed path deviation as a fraction of tooth height (0.1–1.0)')
+            ratio_inp.tooltipDescription = _t(
                 '控制螺旋拟合样条偏离圆柱面的允许偏差，'
                 '以牙高 H 的比例表示。<br/><br/>'
                 '允许偏差 = 系数 × H。系数越小，每圈采样点越多，'
                 '牙侧面越光滑，但生成越慢。<br/><br/>'
-                '默认 0.5（允许偏差 = 牙高的一半），推荐范围 0.2–0.5。'
-                '过小会显著增加生成时间，过大可能导致扫掠失败。')
+                '默认 0.25，推荐范围 0.1–0.5。过小会显著增加生成时间，'
+                '过大可能导致扫掠失败。',
+                'Controls how far the fitted helix may deviate from the cylinder, '
+                'as a fraction of H.<br/><br/>Allowed deviation = ratio × H. '
+                'Lower values add samples and smooth the flank but generate more slowly.'
+                '<br/><br/>Default: 0.25; recommended: 0.1–0.5. Values that are too '
+                'large can make the sweep fail.')
 
-            inputs.addTextBoxCommandInput('calc_info', '自动计算',
-                '<i>选择面后自动计算...</i>', 6, True)
+            inputs.addTextBoxCommandInput(
+                'calc_info', _t('自动计算', 'Calculated values'),
+                _t('<i>选择面后自动计算...</i>',
+                   '<i>Select a face to calculate...</i>'), 6, True)
 
             on_exec     = MyExecuteHandler()
             on_change   = MyInputChangedHandler()
@@ -1231,7 +1284,7 @@ class MyCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             cmd.destroy.add(on_destroy)
             _handlers.extend([on_exec, on_change, on_validate, on_destroy])
         except:
-            _ui.messageBox(traceback.format_exc(), '初始化失败')
+            _ui.messageBox(traceback.format_exc(), _t('初始化失败', 'Initialization failed'))
 
 
 class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
@@ -1308,47 +1361,69 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
             warnings = []
             if expert_mode:
                 if P <= 0 or S <= 0 or L_val <= 0 or H_val <= 0:
-                    warnings.append('危险：P、S、L、H 应大于 0。')
+                    warnings.append(_t('危险：P、S、L、H 应大于 0。',
+                                       'DANGER: P, S, L, and H must be positive.'))
                 if L_val <= S:
-                    warnings.append('危险：牙底宽度 L 应大于牙顶宽度 S，否则无法形成普通梯形。')
+                    warnings.append(_t(
+                        '危险：牙底宽度 L 应大于牙顶宽度 S，否则无法形成普通梯形。',
+                        'DANGER: Root width L must exceed crest width S to form a normal trapezoid.'))
                 if P < L_val:
-                    warnings.append('危险：螺距 P 小于牙底宽度 L，相邻牙可能重叠。')
+                    warnings.append(_t('危险：螺距 P 小于牙底宽度 L，相邻牙可能重叠。',
+                                       'DANGER: Pitch P is smaller than root width L; adjacent teeth may overlap.'))
                 if angle_deg > 45.0:
-                    warnings.append('危险：梯形底角大于 45°，牙侧过陡，打印和扫掠失败风险较高。')
+                    warnings.append(_t(
+                        '危险：梯形底角大于 45°，牙侧过陡，打印和扫掠失败风险较高。',
+                        'DANGER: Base angle exceeds 45°; steep flanks increase print and sweep failure risk.'))
                 if 0.008 <= S < 0.02:
-                    warnings.append('牙顶宽度在 0.08–0.20 mm：打印时请降低层高并调整线宽。')
+                    warnings.append(_t(
+                        '牙顶宽度在 0.08–0.20 mm：打印时请降低层高并调整线宽。',
+                        'Crest width is 0.08–0.20 mm: lower layer height and adjust line width when printing.'))
                 elif 0 < S < 0.008:
-                    warnings.append('危险：牙顶宽度小于 0.08 mm，通常难以可靠打印；请降低层高并调整线宽。')
+                    warnings.append(_t(
+                        '危险：牙顶宽度小于 0.08 mm，通常难以可靠打印；请降低层高并调整线宽。',
+                        'DANGER: Crest width is below 0.08 mm and is usually unreliable to print; lower layer height and adjust line width.'))
             else:
                 if not MIN_FLANK_ANGLE_DEG <= angle_deg <= MAX_FLANK_ANGLE_DEG:
-                    warnings.append('普通模式牙侧角必须在 5°–45°。')
+                    warnings.append(_t('普通模式牙侧角必须在 5°–45°。',
+                                       'Normal-mode flank angle must be 5°–45°.'))
                 if S < MIN_SHORT_EDGE_CM - PROFILE_TOLERANCE_CM:
-                    warnings.append('普通模式牙顶宽度不得小于 0.08 mm，请减小 H 或增大 L。')
+                    warnings.append(_t(
+                        '普通模式牙顶宽度不得小于 0.08 mm，请减小 H 或增大 L。',
+                        'Normal-mode crest width cannot be below 0.08 mm; reduce H or increase L.'))
                 if L_val <= 0 or H_val <= 0:
-                    warnings.append('L 和 H 必须大于 0。')
+                    warnings.append(_t('L 和 H 必须大于 0。',
+                                       'L and H must be positive.'))
 
             if warnings:
-                mode_label = '专家模式' if expert_mode else '普通模式'
+                mode_label = (_t('专家模式', 'Expert mode') if expert_mode
+                              else _t('普通模式', 'Normal mode'))
                 profile_box.formattedText = (
-                    f'<b>{mode_label}　底角: {angle_deg:.2f}°</b><br/>'
+                    _t(f'<b>{mode_label}　底角: {angle_deg:.2f}°</b><br/>',
+                       f'<b>{mode_label}  Base angle: {angle_deg:.2f}°</b><br/>') +
                     '<font color="orange"><b>⚠ ' +
                     '<br/>⚠ '.join(warnings) + '</b></font>')
             else:
                 if expert_mode:
-                    profile_box.formattedText = (
+                    profile_box.formattedText = _t(
                         f'<b>专家模式　梯形底角: {angle_deg:.2f}°</b><br/>'
-                        '<font color="green">四个尺寸独立设置</font>')
+                        '<font color="green">四个尺寸独立设置</font>',
+                        f'<b>Expert mode  Base angle: {angle_deg:.2f}°</b><br/>'
+                        '<font color="green">All four dimensions are independent</font>')
                 else:
-                    profile_box.formattedText = (
+                    profile_box.formattedText = _t(
                         f'<b>普通模式：S={S*10:.3f} mm　P={P*10:.3f} mm</b><br/>'
-                        '<font color="green">参数由 L / H / α 安全联动</font>')
+                        '<font color="green">参数由 L / H / α 安全联动</font>',
+                        f'<b>Normal mode: S={S*10:.3f} mm  P={P*10:.3f} mm</b><br/>'
+                        '<font color="green">L / H / α are safely linked</font>')
 
             if has_face and P > 0:
                 face = adsk.fusion.BRepFace.cast(sel_inp.selection(0).entity)
                 radius, height, _, _, _ = _get_cyl_info(face)
                 is_ext = _is_external_face(face)
-                typ_label = '外螺纹（螺杆）' if is_ext else '内螺纹（螺母）'
-                dir_label = '向外长肉' if is_ext else '向内长肉'
+                typ_label = (_t('外螺纹（螺杆）', 'External thread (bolt)') if is_ext
+                             else _t('内螺纹（螺母）', 'Internal thread (nut)'))
+                dir_label = (_t('向外长肉', 'grows outward') if is_ext
+                             else _t('向内长肉', 'grows inward'))
 
                 N = max(1, int((height - offset) / P + 1e-9) - 1)  # 留一圈空间；+1e-9防浮点截断
                 # Reserve one full turn of space
@@ -1363,25 +1438,41 @@ class MyInputChangedHandler(adsk.core.InputChangedEventHandler):
                 P_mm = P * 10
                 path_m = N * math.sqrt(circle_mm**2 + P_mm**2) / 1000 if N > 0 else 0
 
-                lines.append(f'<b>类型:</b> {typ_label}（{dir_label}）')
-                lines.append(f'<b>长边 L:</b> {L_val*10:.2f} mm　'
-                             f'<b>牙顶宽度 S:</b> {S*10:.2f} mm')
-                lines.append(f'<b>梯形高度 H:</b> {H_val*10:.2f} mm　'
-                             f'<b>螺距 P:</b> {P*10:.2f} mm')
-                lines.append(f'<b>梯形底角:</b> {angle_deg:.2f}°')
-                lines.append(f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>')
-                lines.append(f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm')
-                lines.append(f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}（每圈 {eff_ppt} 点）')
+                lines.append(_t(f'<b>类型:</b> {typ_label}（{dir_label}）',
+                                f'<b>Type:</b> {typ_label} ({dir_label})'))
+                lines.append(_t(
+                    f'<b>长边 L:</b> {L_val*10:.2f} mm　<b>牙顶宽度 S:</b> {S*10:.2f} mm',
+                    f'<b>Root width L:</b> {L_val*10:.2f} mm  <b>Crest width S:</b> {S*10:.2f} mm'))
+                lines.append(_t(
+                    f'<b>梯形高度 H:</b> {H_val*10:.2f} mm　<b>螺距 P:</b> {P*10:.2f} mm',
+                    f'<b>Height H:</b> {H_val*10:.2f} mm  <b>Pitch P:</b> {P*10:.2f} mm'))
+                lines.append(_t(f'<b>梯形底角:</b> {angle_deg:.2f}°',
+                                f'<b>Base angle:</b> {angle_deg:.2f}°'))
+                lines.append(_t(
+                    f'<b>圆柱 R={radius*10:.2f} mm  H={height*10:.2f} mm</b>',
+                    f'<b>Cylinder R={radius*10:.2f} mm  H={height*10:.2f} mm</b>'))
+                lines.append(_t(
+                    f'<b>转数:</b> {N}　螺旋高度={act_h*10:.2f} mm　偏移={offset*10:.1f} mm',
+                    f'<b>Turns:</b> {N}  Helix height={act_h*10:.2f} mm  Offset={offset*10:.1f} mm'))
+                lines.append(_t(
+                    f'<b>螺旋总长:</b> 约 {path_m:.0f} m　<b>样条线点数:</b> {n_pts}（每圈 {eff_ppt} 点）',
+                    f'<b>Helix length:</b> approx. {path_m:.0f} m  <b>Spline points:</b> {n_pts} ({eff_ppt} per turn)'))
                 if adv_inp.value:
-                    lines.append(
+                    lines.append(_t(
                         f'<b>路径偏差系数:</b> {ratio_val:.2f} '
-                        f'（允许偏差 ≤ {ratio_val * H_val * 10:.3f} mm）')
+                        f'（允许偏差 ≤ {ratio_val * H_val * 10:.3f} mm）',
+                        f'<b>Path deviation ratio:</b> {ratio_val:.2f} '
+                        f'(allowed deviation ≤ {ratio_val * H_val * 10:.3f} mm)'))
                 if capped:
-                    lines.append('<font color="orange">⚠ 圈数已达样条点数预算上限，为保证路径贴合圆柱已自动减少圈数；如需更多圈数请增大端面偏移以外的可用长度或降低每圈采样</font>')
+                    lines.append(_t(
+                        '<font color="orange">⚠ 圈数已达样条点数预算上限，为保证路径贴合圆柱已自动减少圈数；如需更多圈数请增大端面偏移以外的可用长度或降低每圈采样</font>',
+                        '<font color="orange">⚠ The spline-point budget reduced the turn count to keep the path on the cylinder. Increase usable length or lower the requested points per turn.</font>'))
                 if not is_ext and H_val >= radius:
-                    lines.append('<font color="red">⚠ H 必须 < 圆孔半径</font>')
+                    lines.append(_t('<font color="red">⚠ H 必须 < 圆孔半径</font>',
+                                    '<font color="red">⚠ H must be smaller than the hole radius</font>'))
             else:
-                lines.append('<i>选择圆柱面后自动识别内外螺纹...</i>')
+                lines.append(_t('<i>选择圆柱面后自动识别内外螺纹...</i>',
+                                '<i>Select a cylindrical face to detect the thread type...</i>'))
 
             calc_box.formattedText = '<br/>'.join(lines)
         except:
@@ -1467,26 +1558,36 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             )
 
             thread_label = (
-                '外螺纹（螺杆）'
+                _t('外螺纹（螺杆）', 'External thread (bolt)')
                 if result['thread_type'] == 'external'
-                else '内螺纹（螺母）')
+                else _t('内螺纹（螺母）', 'Internal thread (nut)'))
             lead_msg = (
-                f"入口/出口各 {result['lead_in_turns'] * 8:.0f}/8 圈渐变"
-                '（牙高+牙宽 10%↔100%）'
+                _t(f"入口/出口各 {result['lead_in_turns'] * 8:.0f}/8 圈渐变"
+                   '（牙高+牙宽 10%↔100%）',
+                   f"{result['lead_in_turns'] * 8:.0f}/8-turn entrance/exit ramps "
+                   '(height + width 10%↔100%)')
                 if result['lead_in_turns'] > 0
-                else '未启用（完整牙高螺纹）')
-            message = (
+                else _t('未启用（完整牙高螺纹）',
+                        'Disabled (full-height thread)'))
+            result_msg = (_t('已合并到圆柱体（实体=1）', 'Joined to cylinder (1 body)')
+                          if result['joined_to_target'] else
+                          _t('独立螺纹体（实体=2：螺纹+圆柱）',
+                             'Separate thread body (2 bodies: thread + cylinder)'))
+            message = _t(
                 f'✓ {thread_label}生成完成！\n\n'
                 f"【截面】L={result['tooth_width_mm']:.2f} mm  "
-                f"S={result['short_edge_mm']:.2f} mm  "
-                f"H={result['tooth_height_mm']:.2f} mm\n"
+                f"S={result['short_edge_mm']:.2f} mm  H={result['tooth_height_mm']:.2f} mm\n"
                 f"牙侧角度={result['flank_angle_degrees']:.2f}°\n"
-                f"【螺旋】P={result['pitch_mm']:.2f} mm  "
-                f"转数={result['turns']}  "
+                f"【螺旋】P={result['pitch_mm']:.2f} mm  转数={result['turns']}  "
                 f"高度={result['thread_length_mm']:.2f} mm\n"
-                f"【收口】{lead_msg}\n"
-                f"【结果】{'已合并到圆柱体（实体=1）' if result['joined_to_target'] else '独立螺纹体（实体=2：螺纹+圆柱）'}"
-            )
+                f"【收口】{lead_msg}\n【结果】{result_msg}",
+                f'✓ {thread_label} generated successfully!\n\n'
+                f"[Profile] L={result['tooth_width_mm']:.2f} mm  "
+                f"S={result['short_edge_mm']:.2f} mm  H={result['tooth_height_mm']:.2f} mm\n"
+                f"Flank angle={result['flank_angle_degrees']:.2f}°\n"
+                f"[Helix] P={result['pitch_mm']:.2f} mm  Turns={result['turns']}  "
+                f"Height={result['thread_length_mm']:.2f} mm\n"
+                f"[Lead] {lead_msg}\n[Result] {result_msg}")
             radius_mm = result['cylinder_radius_mm']
             height_mm = result['tooth_height_mm']
             clr = RECOMMENDED_CLEARANCE_MM
@@ -1494,27 +1595,35 @@ class MyExecuteHandler(adsk.core.CommandEventHandler):
             if result['thread_type'] == 'external':
                 base_diameter = 2 * radius_mm + 2 * height_mm
                 suggested = base_diameter + dia_clr
-                message += (
+                message += _t(
                     '\n\n📌 配合螺母建议内径：\n'
-                    f'  圆柱外径（{2 * radius_mm:.1f} mm）+ '
-                    f'{2 * height_mm:.1f} mm（2 × H）+ 间隙\n'
+                    f'  圆柱外径（{2 * radius_mm:.1f} mm）+ {2 * height_mm:.1f} mm（2 × H）+ 间隙\n'
                     f'  = {base_diameter:.1f} mm + 间隙\n'
-                    f'  建议间隙（单侧）≈ {clr:.1f} mm → 内径 ≈ {suggested:.1f} mm\n'
-                    f'  （FDM 打印常用单侧间隙 0.2–0.4 mm，可按打印机精度调整）')
+                    f'  建议单侧间隙 ≈ {clr:.1f} mm → 内径 ≈ {suggested:.1f} mm\n'
+                    '  （FDM 常用单侧间隙 0.2–0.4 mm，请按打印机精度调整）',
+                    '\n\n📌 Suggested mating nut inside diameter:\n'
+                    f'  Cylinder OD ({2 * radius_mm:.1f} mm) + {2 * height_mm:.1f} mm (2 × H) + clearance\n'
+                    f'  = {base_diameter:.1f} mm + clearance\n'
+                    f'  Suggested per-side clearance ≈ {clr:.1f} mm → ID ≈ {suggested:.1f} mm\n'
+                    '  (Typical FDM per-side clearance is 0.2–0.4 mm; tune for your printer.)')
             else:
                 base_diameter = 2 * radius_mm - 2 * height_mm
                 suggested = base_diameter - dia_clr
-                message += (
+                message += _t(
                     '\n\n📌 配合螺杆建议外径：\n'
-                    f'  圆孔内径（{2 * radius_mm:.1f} mm）- '
-                    f'{2 * height_mm:.1f} mm（2 × H）- 间隙\n'
+                    f'  圆孔内径（{2 * radius_mm:.1f} mm）- {2 * height_mm:.1f} mm（2 × H）- 间隙\n'
                     f'  = {base_diameter:.1f} mm - 间隙\n'
-                    f'  建议间隙（单侧）≈ {clr:.1f} mm → 外径 ≈ {suggested:.1f} mm\n'
-                    f'  （FDM 打印常用单侧间隙 0.2–0.4 mm，可按打印机精度调整）')
-            _ui.messageBox(message, '生成成功')
+                    f'  建议单侧间隙 ≈ {clr:.1f} mm → 外径 ≈ {suggested:.1f} mm\n'
+                    '  （FDM 常用单侧间隙 0.2–0.4 mm，请按打印机精度调整）',
+                    '\n\n📌 Suggested mating screw outside diameter:\n'
+                    f'  Hole ID ({2 * radius_mm:.1f} mm) - {2 * height_mm:.1f} mm (2 × H) - clearance\n'
+                    f'  = {base_diameter:.1f} mm - clearance\n'
+                    f'  Suggested per-side clearance ≈ {clr:.1f} mm → OD ≈ {suggested:.1f} mm\n'
+                    '  (Typical FDM per-side clearance is 0.2–0.4 mm; tune for your printer.)')
+            _ui.messageBox(message, _t('生成成功', 'Generation complete'))
         except:
             _ui.messageBox(
-                traceback.format_exc(), '执行失败')
+                traceback.format_exc(), _t('执行失败', 'Generation failed'))
 
 class MyDestroyHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
@@ -1551,8 +1660,10 @@ def run(_context: str):
         # 注册命令定义
         # Register command definition
         cmd_def = _ui.commandDefinitions.addButtonDefinition(
-            CMD_ID, CMD_NAME,
-            '适配3D打印的螺纹生成工具，自动识别内外表面')
+            CMD_ID, _t('ThreadFor3DPrinter【测试 P/S】',
+                       'ThreadFor3DPrinter [TEST P/S]'),
+            _t('适配3D打印的螺纹生成工具，自动识别内外表面',
+               '3D-printable thread generator with automatic external/internal detection'))
         on_created = MyCommandCreatedHandler()
         cmd_def.commandCreated.add(on_created)
         _handlers.append(on_created)
@@ -1566,7 +1677,7 @@ def run(_context: str):
                 panel.controls.addCommand(cmd_def)
     except:
         if _ui:
-            _ui.messageBox(traceback.format_exc(), '启动失败')
+            _ui.messageBox(traceback.format_exc(), _t('启动失败', 'Startup failed'))
 
 
 def stop(_context: str):

@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download v3.2.0](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.0/ThreadFor3DPrinter-Test-v3.2.0.zip)
+[中文说明](README.zh-CN.md) · [Download v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinter-Test-v3.2.1.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -17,6 +17,7 @@
 - Automatically detects internal and external cylindrical faces.
 - Defaults to normal mode: enter root width, height, and flank angle; crest width and pitch remain safely linked.
 - Enable **Expert mode** to edit pitch, crest width, root width, and height independently. Risky values warn without disabling **OK**.
+- Displays Chinese in Chinese Fusion installations and English in all other Fusion UI languages.
 - Allows a minimum `0.08 mm` crest flat while preventing a degenerate or self-intersecting profile.
 - Optional **thread lead-in/lead-out**: the first and last 1/8 turn of the thread ramp the section (tooth height + width) from 10% to full size, so mating parts slide in easily and both ends stay print-friendly; can be disabled in the dialog.
 - Shows the estimated helix length and spline-point count, with warnings for risky sampling settings.
