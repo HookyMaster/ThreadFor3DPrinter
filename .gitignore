@@ -5,3 +5,4 @@ reasonix.toml
 dist/
 __pycache__/
 .workbuddy/
+.vscode/

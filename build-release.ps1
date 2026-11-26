@@ -11,15 +11,16 @@ if (-not $versionMatch.Success) {
 $version = $versionMatch.Groups['version'].Value
 
 $distRoot = Join-Path $repoRoot 'dist'
-$stageRoot = Join-Path $distRoot 'ThreadFor3DPrinter'
-$zipPath = Join-Path $distRoot "ThreadFor3DPrinter-v$version.zip"
+$stageRoot = Join-Path $distRoot 'ThreadFor3DPrinter-Test'
+$zipPath = Join-Path $distRoot "ThreadFor3DPrinter-Test-v$version.zip"
 $releaseFiles = @(
     'ThreadFor3DPrinter.py',
     'ThreadFor3DPrinter.manifest',
     'icon-v4.png',
     'LICENSE',
     'README.md',
-    'README.zh-CN.md'
+    'README.zh-CN.md',
+    '如何设计67mm滤镜螺纹.md'
 )
 
 New-Item -ItemType Directory -Force -Path $distRoot | Out-Null

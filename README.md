@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download v3.1.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.1.1/ThreadFor3DPrinter-v3.1.1.zip)
+[中文说明](README.zh-CN.md) · [Download v3.2.0](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.0/ThreadFor3DPrinter-Test-v3.2.0.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 
@@ -13,10 +13,11 @@
 ## Features
 
 - Generates both external bolt threads and internal nut/hole threads.
-- Uses a 3D-printing-friendly trapezoidal profile with an adjustable **5°–45° flank angle**.
+- Uses a 3D-printing-friendly trapezoidal profile with a live calculated base angle.
 - Automatically detects internal and external cylindrical faces.
-- Provides adjustable tooth-root width, tooth height, flank angle, sampling resolution, and end offset.
-- Automatically calculates the tooth crest width and preserves a minimum `0.2 mm` crest flat to prevent profile self-intersection.
+- Defaults to normal mode: enter root width, height, and flank angle; crest width and pitch remain safely linked.
+- Enable **Expert mode** to edit pitch, crest width, root width, and height independently. Risky values warn without disabling **OK**.
+- Allows a minimum `0.08 mm` crest flat while preventing a degenerate or self-intersecting profile.
 - Optional **thread lead-in/lead-out**: the first and last 1/8 turn of the thread ramp the section (tooth height + width) from 10% to full size, so mating parts slide in easily and both ends stay print-friendly; can be disabled in the dialog.
 - Shows the estimated helix length and spline-point count, with warnings for risky sampling settings.
 - Reports a suggested mating nut or bolt diameter after generation, including recommended print clearance.
@@ -96,16 +97,19 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
    - **External thread (bolt):** the profile grows outward.
    - **Internal thread (nut):** the profile grows inward.
 4. Set the thread parameters:
-   - **Long edge L (tooth-root width):** axial width at the root of the trapezoidal tooth profile. Default: `3 mm`.
+   - **Expert mode:** off by default. Off uses the original linked L/H/α method; on uses independent P/S/L/H.
+   - **Pitch P:** axial distance between adjacent teeth. Default: `4 mm`.
+   - **Tooth crest width S:** flat width at the tooth crest. Default: `1 mm`; minimum: `0.08 mm`.
+   - **Tooth-root width L:** flat width at the tooth root. Default: `3 mm`.
    - **Trapezoid height H (tooth height):** radial height/depth of the thread tooth. Default: `1 mm`.
-   - **Flank angle α:** angle between either tooth flank and the thread axis. Adjustable from `5°` to `45°`.
+   - **Trapezoid base angle α:** calculated from L, S and H. Values above `45°` are reported as dangerous but do not block generation.
    - **Points per turn:** helix sampling resolution. Default: `16`; minimum: `4`. The add-in automatically raises this value for large diameters so the helix path stays within a quarter of the tooth height of the cylinder surface; the value you enter is used as a lower bound.
    - **End offset:** distance between the cylinder end and the start of the helix. Default: `0 mm`.
    - **Thread lead-in/lead-out:** when ticked (default), the first and last 1/8 turn of the thread ramp the section (tooth height + width) from 10% to full size, making it easier to start the mating part and keeping both ends print-friendly; untick to generate a full-height legacy thread.
    - **Join to cylinder:** when ticked (default), the thread body is boolean-joined with the selected cylinder into a single body; untick to keep the thread and cylinder as two separate bodies. Joining removes the seam visible between two bodies when zoomed in.
    - **Show advanced options:** tick to reveal the "Deviation ratio" input.
    - **Deviation ratio** (advanced): controls the allowed deviation of the fitted helix spline from the cylinder surface, expressed as a fraction of the tooth height H (allowed deviation = ratio × H). Default: `0.25` (deviation within a quarter of the tooth height); recommended range `0.1–0.5`. A smaller ratio uses more samples per turn for smoother tooth flanks but is slower to generate; too large a value may cause a sweep failure. Hover the mouse over the input for a detailed description.
-5. Review the automatically calculated **tooth crest width S (crest flat)**, pitch, turn count, helix height and length, spline-point count, cylinder size, and detected thread type. The profile-status area directly below the H and angle inputs reports any automatic correction.
+5. In normal mode, set L, H, and α and review the calculated S and P. In expert mode, set P, S, L, and H independently; the status area reports base-angle, narrow-crest, and tooth-overlap risks without disabling **OK**.
 6. Click **OK** to generate the helical path, trapezoidal profile, and swept thread body.
 
 ## Parameter rules
@@ -113,23 +117,42 @@ Enable **Run on Startup** in the Add-Ins dialog if you want it loaded automatica
 The add-in calculates:
 
 ```text
-Axial inset per flank A = H / tan(α)
-Tooth crest width S     = L - 2A
-Pitch P                 = L + S = 2(L - A)
-Maximum H               = (L - 0.2 mm) × tan(α) / 2
+Flank run A             = (L - S) / 2
+Flank angle α           = atan(H / A)
 ```
 
-`L` is the tooth-root width, `S` is the tooth crest width (crest flat), `H` is the radial tooth height, and `A` is the axial inset of each flank. Changing `H` or `α` recalculates `S` and the pitch. To keep a valid trapezoidal profile, `S` must remain at least `0.2 mm`. If the requested height would make it smaller, the add-in automatically reduces `H` to the maximum valid value while preserving the selected flank angle. This is a geometry safeguard, not a calculation error.
+`P` is the pitch, `L` is the tooth-root width, `S` is the tooth crest width, `H` is the radial tooth height, and `A` is the axial inset of each flank. P, S, L and H are independently editable. A base angle above `45°` produces a danger warning. For `0.08 mm ≤ S < 0.20 mm`, lower layer height and adjust line width. Below `0.08 mm`, the add-in shows a stronger print-risk warning. These warnings do not block generation.
 
-Inputs must satisfy:
+Expert-mode recommendations (violations warn but do not block generation):
 
-- `L > 0.2 mm`
+- `L > S > 0`
 - `H > 0`
-- `5° ≤ α ≤ 45°`
-- `S = L - 2H / tan(α) ≥ 0.2 mm`
+- `α ≤ 45°`
+- `S ≥ 0.20 mm`; for `0.08 mm ≤ S < 0.20 mm`, lower layer height and adjust line width
 - For an internal thread, `H` must be smaller than the hole radius.
 
 The add-in reserves approximately one full turn of axial space. The generated number of turns may therefore be lower than the simple cylinder-length/pitch ratio.
+
+## Special case: 67 mm camera-filter thread
+
+A common 67 mm camera filter uses an `M67 × 0.75` thread. Because the `0.75 mm` pitch must remain exact, enable **Expert mode** and set P, S, L, and H independently.
+
+Suggested starting values for an FDM test print:
+
+```text
+Pitch P:                0.75 mm
+Crest width S:          0.12 mm
+Root width L:           0.58 mm
+Tooth height H:         0.40 mm
+Base-cylinder diameter: 66.00 mm
+Target major diameter:  66.80 mm
+```
+
+These dimensions produce a displayed base angle of about `60.1°`, so the add-in reports the angle-above-45° danger warning. The `0.12 mm` crest also triggers the recommendation to lower layer height and adjust line width. Expert mode permits generation, but both Fusion sweeping and physical printing carry increased risk; print a short 3–5-turn test ring first.
+
+The nominal remaining groove width is only `P − L = 0.17 mm`. With an approximately `0.15 mm` mating crest, the nominal axial margin is about `0.02 mm`, which can easily disappear through print error. Do not assume the parts will avoid binding without a fit test.
+
+For the full dimensional derivation, angle convention, internal/external design, and test-record template, see [How to design a 67 mm filter thread](如何设计67mm滤镜螺纹.md) (Chinese).
 
 ## After generation
 
@@ -157,6 +180,8 @@ result = thread_tool.generate_thread(
     face=target_cylindrical_face,
     tooth_width_mm=1.5,
     tooth_height_mm=0.5,
+    pitch_mm=2.0,
+    crest_width_mm=0.5,
     end_offset_mm=1.0,
     samples_per_turn=16,
     join_to_target=True,
@@ -176,6 +201,8 @@ payload = {
     'face_token': target_cylindrical_face.entityToken,
     'tooth_width_mm': 1.5,
     'tooth_height_mm': 0.5,
+    'pitch_mm': 2.0,
+    'crest_width_mm': 0.5,
     'end_offset_mm': 1.0,
     'samples_per_turn': 16,
     'join_to_target': True,
@@ -206,8 +233,11 @@ string. Its result is a JSON-serializable dictionary containing:
 
 - `face` must be a true cylindrical BRep face.
 - Public API dimensions are expressed in millimetres.
-- `flank_angle_degrees` must be between `5` and `45` and defaults to `45`.
-- The calculated tooth crest width `tooth_width_mm - 2 * tooth_height_mm / tan(flank_angle_degrees)` must be at least `0.2 mm`.
+- Legacy calls without `pitch_mm` and `crest_width_mm` retain the original
+  `5°–45°` flank-angle and `0.08 mm` crest validation.
+- When `pitch_mm` and `crest_width_mm` are supplied, `tooth_width_mm` is the
+  independent root width. A base angle above `45°` or a crest below `0.20 mm`
+  is reported as a risk rather than blocked.
 - `samples_per_turn` has a minimum effective value of `4`. It is used as a
   lower bound: for large cylinder radii the add-in automatically raises it so
   the fitted helix stays within a quarter of the tooth height of the cylinder
@@ -249,9 +279,9 @@ string. Its result is a JSON-serializable dictionary containing:
 
 ## Troubleshooting
 
-- **The OK button is disabled:** select exactly one cylindrical face and verify the parameter rules above.
+- **The OK button is disabled:** select exactly one cylindrical face; parameter-risk warnings do not disable the button.
 - **Internal thread depth warning:** reduce `H` so it is smaller than the hole radius.
-- **H was reduced automatically:** the requested H and flank angle would make the tooth crest width smaller than `0.2 mm`; the add-in uses the largest safe H to prevent a self-intersecting profile.
+- **Parameter risk warning:** a base angle above `45°` is dangerous. For a `0.08–0.20 mm` crest, lower layer height and adjust line width. Warnings do not disable **OK**.
 - **The command is missing:** run the add-in again from **Scripts and Add-Ins**, or restart Fusion.
 - **The icon does not update:** close and reopen the **Scripts and Add-Ins** dialog, or restart Fusion.
 - **The thread looks faceted:** increase **Points per turn**. Higher values produce more geometry and may take longer; the total helix sample count is capped at 20000, and beyond that the turn count is reduced rather than the sampling density.
