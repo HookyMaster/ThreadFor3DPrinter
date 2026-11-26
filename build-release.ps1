@@ -11,7 +11,7 @@ if (-not $versionMatch.Success) {
 $version = $versionMatch.Groups['version'].Value
 
 $distRoot = Join-Path $repoRoot 'dist'
-$stageRoot = Join-Path $distRoot 'ThreadFor3DPrinter-Test'
+$stageRoot = Join-Path $distRoot 'ThreadFor3DPrinter'
 $zipPath = Join-Path $distRoot "ThreadFor3DPrinter-Test-v$version.zip"
 $releaseFiles = @(
     'ThreadFor3DPrinter.py',
