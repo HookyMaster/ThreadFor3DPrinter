@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[中文说明](README.zh-CN.md) · [Download v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinter-Test-v3.2.1.zip)
+[中文说明](README.zh-CN.md) · [Download v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinterTest-v3.2.1.zip)
 
 <img src="icon-v4.png" alt="Fusion 360 add-in for generating 3D-printable internal and external trapezoidal threads" width="160">
 

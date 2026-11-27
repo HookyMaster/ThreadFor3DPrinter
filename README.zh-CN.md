@@ -4,7 +4,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/Autodesk-Fusion-orange)
 
-[English README](README.md) · [下载 v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinter-Test-v3.2.1.zip)
+[English README](README.md) · [下载 v3.2.1](https://github.com/HookyMaster/ThreadFor3DPrinter/releases/download/v3.2.1/ThreadFor3DPrinterTest-v3.2.1.zip)
 
 <img src="icon-v4.png" alt="用于生成适合 3D 打印的内外梯形螺纹的 Fusion 360 附加模块" width="160">
 
